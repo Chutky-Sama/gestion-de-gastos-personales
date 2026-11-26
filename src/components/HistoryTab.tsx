@@ -5,6 +5,7 @@ import {
   Download,
   ExternalLink,
   FileSpreadsheet,
+  FolderOpen,
   History,
   RotateCcw,
   Sparkles,
@@ -28,6 +29,8 @@ import {
 interface HistoryTabProps {
   db: AppDatabase;
   activeMonthKey: string;
+  desktopStoragePath?: string;
+  onOpenDataFolder?: () => Promise<void>;
   onSelectMonth: (monthKey: string) => void;
   onLoadDemo: () => Promise<void>;
   onResetClean: () => Promise<void>;
@@ -37,6 +40,8 @@ interface HistoryTabProps {
 export const HistoryTab: React.FC<HistoryTabProps> = ({
   db,
   activeMonthKey,
+  desktopStoragePath,
+  onOpenDataFolder,
   onSelectMonth,
   onLoadDemo,
   onResetClean,
@@ -125,11 +130,21 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
             </h3>
             <p style={{ margin: 0, fontSize: '0.84rem', color: 'var(--text-secondary)' }}>
               Todos tus meses, cambios de salario, inversiones y movimientos se guardan
-              automáticamente en el disco local (<span className="mono">data/kakeibo-store.json</span>).
+              automáticamente en tu disco local (
+              <span className="mono">{desktopStoragePath || 'data/kakeibo-store.json'}</span>).
             </p>
           </div>
 
           <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+            {desktopStoragePath && onOpenDataFolder && (
+              <button
+                type="button"
+                className="btn btn-sm btn-violet"
+                onClick={onOpenDataFolder}
+              >
+                <FolderOpen size={14} /> Abrir Carpeta en Windows
+              </button>
+            )}
             <button
               type="button"
               className="btn btn-sm btn-cyan"
