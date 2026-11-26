@@ -21,7 +21,7 @@ import {
   shiftMonthKey,
 } from '../shared/calculations';
 import { AppDatabase, InvestmentDefinition } from '../shared/types';
-import { api } from './api';
+import { DesktopInfo, api } from './api';
 import { AdjustBalanceModal } from './components/AdjustBalanceModal';
 import { EnvelopesTab } from './components/EnvelopesTab';
 import { HistoryTab } from './components/HistoryTab';
@@ -42,6 +42,7 @@ export const App: React.FC = () => {
 
   const [isAdjustOpen, setIsAdjustOpen] = useState(false);
   const [isSalaryModalOpen, setIsSalaryModalOpen] = useState(false);
+  const [desktopInfo, setDesktopInfo] = useState<DesktopInfo>({ isDesktop: false });
 
   const showToast = useCallback((msg: string) => {
     setToast(msg);
@@ -54,9 +55,9 @@ export const App: React.FC = () => {
   }, [toast]);
 
   useEffect(() => {
-    api
-      .getState()
-      .then((data) => {
+    Promise.all([api.getDesktopInfo(), api.getState()])
+      .then(([info, data]) => {
+        setDesktopInfo(info);
         setDb(data);
         const curr = getCurrentMonthKey();
         if (data.months[curr]) {
@@ -585,6 +586,15 @@ export const App: React.FC = () => {
           <HistoryTab
             db={db}
             activeMonthKey={currentMonth.monthKey}
+            desktopStoragePath={desktopInfo.storagePath}
+            onOpenDataFolder={
+              desktopInfo.isDesktop
+                ? async () => {
+                    await api.openDataFolder();
+                    showToast('Abriendo carpeta en el Explorador de Windows...');
+                  }
+                : undefined
+            }
             onSelectMonth={(mk) => {
               handleChangeMonth(mk);
               setActiveTab('ledger');

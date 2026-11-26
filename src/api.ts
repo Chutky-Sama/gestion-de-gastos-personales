@@ -6,8 +6,63 @@ import {
   MonthAllocations,
   MonthReflection,
 } from '../shared/types';
+import { desktopEngine } from './desktopEngine';
 
 const LOCAL_MIRROR_KEY = 'neon_kakeibo_mirror_v1';
+
+export interface DesktopInfo {
+  isDesktop: boolean;
+  storagePath?: string;
+  dataDir?: string;
+}
+
+let resolvedDesktopInfo: DesktopInfo | null = null;
+let heartbeatStarted = false;
+
+export async function getDesktopInfo(): Promise<DesktopInfo> {
+  if (resolvedDesktopInfo) return resolvedDesktopInfo;
+  try {
+    const res = await fetch('/api/desktop/info');
+    if (res.ok) {
+      const data = await res.json();
+      if (data && data.isDesktop === true) {
+        resolvedDesktopInfo = {
+          isDesktop: true,
+          storagePath: data.storagePath,
+          dataDir: data.dataDir,
+        };
+        startDesktopHeartbeat();
+        return resolvedDesktopInfo;
+      }
+    }
+  } catch {
+    // Not in desktop exe
+  }
+  resolvedDesktopInfo = { isDesktop: false };
+  return resolvedDesktopInfo;
+}
+
+function startDesktopHeartbeat(): void {
+  if (heartbeatStarted) return;
+  heartbeatStarted = true;
+
+  try {
+    const es = new EventSource('/api/desktop/events');
+    window.addEventListener('pagehide', () => {
+      es.close();
+      if (navigator.sendBeacon) {
+        navigator.sendBeacon('/api/desktop/window-closed', '');
+      }
+    });
+  } catch {
+    // Fallback polling if EventSource unavailable
+    const ping = () => {
+      fetch('/api/desktop/ping', { method: 'POST', keepalive: true }).catch(() => {});
+    };
+    ping();
+    window.setInterval(ping, 3000);
+  }
+}
 
 async function requestJson<T>(url: string, options?: RequestInit): Promise<T> {
   const res = await fetch(url, {
@@ -23,7 +78,7 @@ async function requestJson<T>(url: string, options?: RequestInit): Promise<T> {
       const body = await res.json();
       if (body?.error) errMsg = body.error;
     } catch {
-      // ignore json parse failure
+      // ignore
     }
     throw new Error(errMsg);
   }
@@ -32,34 +87,50 @@ async function requestJson<T>(url: string, options?: RequestInit): Promise<T> {
   try {
     localStorage.setItem(LOCAL_MIRROR_KEY, JSON.stringify(data));
   } catch {
-    // ignore storage quota errors
+    // ignore
   }
   return data;
 }
 
 export const api = {
-  getState: () => requestJson<AppDatabase>('/api/state'),
+  getDesktopInfo,
 
-  updateProfile: (payload: {
+  openDataFolder: async (): Promise<void> => {
+    await fetch('/api/desktop/open-folder', { method: 'POST' });
+  },
+
+  getState: async () => {
+    const info = await getDesktopInfo();
+    if (info.isDesktop) return desktopEngine.getState();
+    return requestJson<AppDatabase>('/api/state');
+  },
+
+  updateProfile: async (payload: {
     ledgerName?: string;
     currencyCode?: string;
     currencySymbol?: string;
     currentSalary?: number;
     hasManutencionesDefault?: boolean;
     syncMonthKey?: string;
-  }) =>
-    requestJson<AppDatabase>('/api/profile', {
+  }) => {
+    const info = await getDesktopInfo();
+    if (info.isDesktop) return desktopEngine.updateProfile(payload);
+    return requestJson<AppDatabase>('/api/profile', {
       method: 'PUT',
       body: JSON.stringify(payload),
-    }),
+    });
+  },
 
-  ensureMonth: (monthKey: string, bringCarryoverFrom?: string) =>
-    requestJson<AppDatabase>(`/api/months/${monthKey}/ensure`, {
+  ensureMonth: async (monthKey: string, bringCarryoverFrom?: string) => {
+    const info = await getDesktopInfo();
+    if (info.isDesktop) return desktopEngine.ensureMonth(monthKey, bringCarryoverFrom);
+    return requestJson<AppDatabase>(`/api/months/${monthKey}/ensure`, {
       method: 'POST',
       body: JSON.stringify({ bringCarryoverFrom }),
-    }),
+    });
+  },
 
-  updateMonthPlan: (
+  updateMonthPlan: async (
     monthKey: string,
     payload: {
       salary?: number;
@@ -69,13 +140,16 @@ export const api = {
       reflection?: Partial<MonthReflection>;
       alsoUpdateCurrentSalary?: boolean;
     }
-  ) =>
-    requestJson<AppDatabase>(`/api/months/${monthKey}/plan`, {
+  ) => {
+    const info = await getDesktopInfo();
+    if (info.isDesktop) return desktopEngine.updateMonthPlan(monthKey, payload);
+    return requestJson<AppDatabase>(`/api/months/${monthKey}/plan`, {
       method: 'PUT',
       body: JSON.stringify(payload),
-    }),
+    });
+  },
 
-  addEntry: (
+  addEntry: async (
     monthKey: string,
     payload: {
       date: string;
@@ -87,13 +161,16 @@ export const api = {
       pillar: KakeiboPillar;
       note?: string;
     }
-  ) =>
-    requestJson<AppDatabase>(`/api/months/${monthKey}/entries`, {
+  ) => {
+    const info = await getDesktopInfo();
+    if (info.isDesktop) return desktopEngine.addEntry(monthKey, payload);
+    return requestJson<AppDatabase>(`/api/months/${monthKey}/entries`, {
       method: 'POST',
       body: JSON.stringify(payload),
-    }),
+    });
+  },
 
-  updateEntry: (
+  updateEntry: async (
     monthKey: string,
     entryId: string,
     payload: {
@@ -106,18 +183,24 @@ export const api = {
       pillar?: KakeiboPillar;
       note?: string;
     }
-  ) =>
-    requestJson<AppDatabase>(`/api/months/${monthKey}/entries/${entryId}`, {
+  ) => {
+    const info = await getDesktopInfo();
+    if (info.isDesktop) return desktopEngine.updateEntry(monthKey, entryId, payload);
+    return requestJson<AppDatabase>(`/api/months/${monthKey}/entries/${entryId}`, {
       method: 'PUT',
       body: JSON.stringify(payload),
-    }),
+    });
+  },
 
-  deleteEntry: (monthKey: string, entryId: string) =>
-    requestJson<AppDatabase>(`/api/months/${monthKey}/entries/${entryId}`, {
+  deleteEntry: async (monthKey: string, entryId: string) => {
+    const info = await getDesktopInfo();
+    if (info.isDesktop) return desktopEngine.deleteEntry(monthKey, entryId);
+    return requestJson<AppDatabase>(`/api/months/${monthKey}/entries/${entryId}`, {
       method: 'DELETE',
-    }),
+    });
+  },
 
-  adjustGeneralBalance: (
+  adjustGeneralBalance: async (
     monthKey: string,
     payload: {
       mode: 'delta' | 'target';
@@ -126,26 +209,32 @@ export const api = {
       reason?: string;
       date?: string;
     }
-  ) =>
-    requestJson<AppDatabase>(`/api/months/${monthKey}/adjust-balance`, {
+  ) => {
+    const info = await getDesktopInfo();
+    if (info.isDesktop) return desktopEngine.adjustGeneralBalance(monthKey, payload);
+    return requestJson<AppDatabase>(`/api/months/${monthKey}/adjust-balance`, {
       method: 'POST',
       body: JSON.stringify(payload),
-    }),
+    });
+  },
 
-  createInvestment: (payload: {
+  createInvestment: async (payload: {
     name: string;
     category: InvestmentCategory;
     monthlyTarget: number;
     platform?: string;
     notes?: string;
     monthKey?: string;
-  }) =>
-    requestJson<AppDatabase>('/api/investments', {
+  }) => {
+    const info = await getDesktopInfo();
+    if (info.isDesktop) return desktopEngine.createInvestment(payload);
+    return requestJson<AppDatabase>('/api/investments', {
       method: 'POST',
       body: JSON.stringify(payload),
-    }),
+    });
+  },
 
-  updateInvestment: (
+  updateInvestment: async (
     id: string,
     payload: {
       name?: string;
@@ -156,30 +245,41 @@ export const api = {
       active?: boolean;
       monthKey?: string;
     }
-  ) =>
-    requestJson<AppDatabase>(`/api/investments/${id}`, {
+  ) => {
+    const info = await getDesktopInfo();
+    if (info.isDesktop) return desktopEngine.updateInvestment(id, payload);
+    return requestJson<AppDatabase>(`/api/investments/${id}`, {
       method: 'PUT',
       body: JSON.stringify(payload),
-    }),
+    });
+  },
 
-  deleteInvestment: (id: string) =>
-    requestJson<AppDatabase>(`/api/investments/${id}`, {
+  deleteInvestment: async (id: string) => {
+    const info = await getDesktopInfo();
+    if (info.isDesktop) return desktopEngine.deleteInvestment(id);
+    return requestJson<AppDatabase>(`/api/investments/${id}`, {
       method: 'DELETE',
-    }),
+    });
+  },
 
-  loadDemo: () =>
-    requestJson<AppDatabase>('/api/demo', {
-      method: 'POST',
-    }),
+  loadDemo: async () => {
+    const info = await getDesktopInfo();
+    if (info.isDesktop) return desktopEngine.loadDemo();
+    return requestJson<AppDatabase>('/api/demo', { method: 'POST' });
+  },
 
-  resetDatabase: () =>
-    requestJson<AppDatabase>('/api/reset', {
-      method: 'POST',
-    }),
+  resetDatabase: async () => {
+    const info = await getDesktopInfo();
+    if (info.isDesktop) return desktopEngine.resetDatabase();
+    return requestJson<AppDatabase>('/api/reset', { method: 'POST' });
+  },
 
-  importBackup: (backup: AppDatabase) =>
-    requestJson<AppDatabase>('/api/import', {
+  importBackup: async (backup: AppDatabase) => {
+    const info = await getDesktopInfo();
+    if (info.isDesktop) return desktopEngine.importBackup(backup);
+    return requestJson<AppDatabase>('/api/import', {
       method: 'POST',
       body: JSON.stringify(backup),
-    }),
+    });
+  },
 };
