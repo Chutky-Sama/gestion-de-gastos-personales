@@ -6,11 +6,13 @@ import {
   applyDeleteEntry,
   applyDeleteInvestment,
   applyEnsureMonth,
+  applyExecuteCurrencyExchange,
   applyExitDemoReset,
   applySelectCurrency,
   applyStartOneTimeDemo,
   applyUpdateEnabledCurrencies,
   applyUpdateEntry,
+  applyUpdateExchangeRate,
   applyUpdateInvestment,
   applyUpdateMonthPlan,
   applyUpdateProfile,
@@ -214,6 +216,35 @@ export const desktopEngine = {
   deleteInvestment: async (id: string) => {
     const db = await loadDesktopDb();
     return saveDesktopDb(applyDeleteInvestment(db, id));
+  },
+
+  updateExchangeRate: async (payload: {
+    currencyCode: string;
+    rateEfectivo: number;
+    rateTransferencia?: number;
+    useSeparateChannels?: boolean;
+    note?: string;
+  }) => {
+    const db = await loadDesktopDb();
+    return saveDesktopDb(applyUpdateExchangeRate(db, payload));
+  },
+
+  executeCurrencyExchange: async (payload: {
+    monthKey: string;
+    date?: string;
+    fromCurrency: string;
+    fromMethod: PaymentMethod;
+    fromAmount: number;
+    toCurrency: string;
+    toMethod: PaymentMethod;
+    toAmount: number;
+    effectiveCupRate: number;
+    alsoSaveRate?: boolean;
+    applyToLedgers: boolean;
+    note?: string;
+  }) => {
+    const db = await loadDesktopDb();
+    return saveDesktopDb(applyExecuteCurrencyExchange(db, payload));
   },
 
   loadDemo: async () => {

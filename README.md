@@ -32,6 +32,12 @@ No necesitas instalar Node.js, ni Python, ni abrir ninguna consola:
 * **Monedas de Cuba y Multimoneda en Paralelo (`CUP`, `USD`, `MLC`, `EUR`...)**:
   * Incluye **Peso Cubano (`CUP`)**, **Dólar Estadounidense (`USD`)**, **`MLC`**, **Euro (`EUR`)** y monedas internacionales adicionales.
   * Cambia con 1 clic en la barra superior entre tu libreta en **`CUP`** y tu libreta en **`USD`** (u otras monedas habilitadas) sin mezclar saldos.
+* **Pestaña de Cambio de Monedas en Base `CUP` (100% Local · Sin Internet)**:
+  * **Pizarra Manual de Tasas:** Ingresa tú mismo a cuánto está cada moneda en **`CUP`** cuando lo necesites, con opción de diferenciar **Tasa en Efectivo** y **Tasa por Transferencia**, más historial local de variaciones.
+  * **Patrimonio Total Consolidado en `CUP` (y ref. `USD`):** Suma en tiempo real todas tus libretas activas valoradas en tu moneda nativa `CUP`.
+  * **Calculadora Bidireccional + Cambio Real entre Libretas:** Convierte cualquier par de monedas y, si hiciste un cambio real, descuenta de una libreta y acredita en la otra en un solo clic.
+  * **Comparador Rápido Callejero:** Compara al instante si te conviene pagar un precio pedido en `CUP` o el precio equivalente pedido en divisa (`USD` / `MLC` / `EUR`).
+* **Sello Personal Integrado:** Ícono personalizado multi-resolución incrustado en `NeonKakeibo.exe`, ventana de aplicación y cabecera.
 * **Protección Anti-Borrado: Demo y Reinicio de Un Solo Uso**:
   * Los datos de prueba **Demo** son estrictamente de **un solo uso**.
   * La opción para **reiniciar / limpiar** el programa existe **únicamente una sola vez para salir de la Demo**. En cuanto pasas al uso real (o ingresas tus propios datos), el botón de reinicio queda **desactivado y oculto permanentemente** para que jamás puedas borrar tus registros reales por accidente.

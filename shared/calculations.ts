@@ -579,6 +579,12 @@ function buildEnvelopeStatus(
 
 export function hasRealUserData(db: AppDatabase): boolean {
   if (db.isDemoActive) return false;
+  if (db.exchangeControl) {
+    for (const r of Object.values(db.exchangeControl.rates || {})) {
+      if ((r.rateEfectivo || 0) > 0 || (r.rateTransferencia || 0) > 0) return true;
+    }
+    if ((db.exchangeControl.operations || []).length > 0) return true;
+  }
   const workspaces = Object.values(db.currencyWorkspaces || {});
   for (const ws of workspaces) {
     if ((ws.currentSalary || 0) > 0) return true;

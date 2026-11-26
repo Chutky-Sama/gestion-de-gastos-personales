@@ -292,6 +292,43 @@ export const api = {
     return requestJson<AppDatabase>(`/api/investments/${id}`, { method: 'DELETE' });
   },
 
+  updateExchangeRate: async (payload: {
+    currencyCode: string;
+    rateEfectivo: number;
+    rateTransferencia?: number;
+    useSeparateChannels?: boolean;
+    note?: string;
+  }) => {
+    const info = await getDesktopInfo();
+    if (info.isDesktop) return desktopEngine.updateExchangeRate(payload);
+    return requestJson<AppDatabase>('/api/exchange/rate', {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  },
+
+  executeCurrencyExchange: async (payload: {
+    monthKey: string;
+    date?: string;
+    fromCurrency: string;
+    fromMethod: PaymentMethod;
+    fromAmount: number;
+    toCurrency: string;
+    toMethod: PaymentMethod;
+    toAmount: number;
+    effectiveCupRate: number;
+    alsoSaveRate?: boolean;
+    applyToLedgers: boolean;
+    note?: string;
+  }) => {
+    const info = await getDesktopInfo();
+    if (info.isDesktop) return desktopEngine.executeCurrencyExchange(payload);
+    return requestJson<AppDatabase>('/api/exchange/execute', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  },
+
   loadDemo: async () => {
     const info = await getDesktopInfo();
     if (info.isDesktop) return desktopEngine.loadDemo();

@@ -111,6 +111,17 @@ textarea {
   gap: 14px;
 }
 
+.personal-seal-img {
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex-shrink: 0;
+  filter: drop-shadow(0 0 10px rgba(0, 240, 255, 0.35))
+    drop-shadow(0 0 16px rgba(185, 78, 255, 0.22));
+  user-select: none;
+}
+
 /* Glowing Asian Hanko/Dojang stamp */
 .hanko-seal {
   width: 46px;
