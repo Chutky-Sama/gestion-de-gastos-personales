@@ -10,11 +10,13 @@ import {
   applyDeleteEntry,
   applyDeleteInvestment,
   applyEnsureMonth,
+  applyExecuteCurrencyExchange,
   applyExitDemoReset,
   applySelectCurrency,
   applyStartOneTimeDemo,
   applyUpdateEnabledCurrencies,
   applyUpdateEntry,
+  applyUpdateExchangeRate,
   applyUpdateInvestment,
   applyUpdateMonthPlan,
   applyUpdateProfile,
@@ -100,6 +102,14 @@ async function startServer() {
 
   app.delete('/api/investments/:id', (req, res) => {
     handleMutation(res, (db) => applyDeleteInvestment(db, req.params.id));
+  });
+
+  app.put('/api/exchange/rate', (req, res) => {
+    handleMutation(res, (db) => applyUpdateExchangeRate(db, req.body || {}));
+  });
+
+  app.post('/api/exchange/execute', (req, res) => {
+    handleMutation(res, (db) => applyExecuteCurrencyExchange(db, req.body || {}));
   });
 
   app.post('/api/demo', (_req, res) => {

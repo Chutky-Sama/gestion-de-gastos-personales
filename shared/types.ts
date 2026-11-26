@@ -147,12 +147,57 @@ export interface HistoricalEvent {
     | 'investment_removed'
     | 'balance_adjusted'
     | 'channel_transfer'
+    | 'exchange_rate_updated'
+    | 'currency_exchanged'
     | 'demo_started'
     | 'demo_exited'
     | 'backup_restored';
   title: string;
   detail: string;
   amount?: number;
+}
+
+export interface ManualCurrencyRate {
+  currencyCode: string;        // Ej. 'USD', 'MLC', 'EUR' (1 unidad = X CUP)
+  rateEfectivo: number;        // Cuántos CUP vale 1 unidad en Efectivo
+  rateTransferencia: number;   // Cuántos CUP vale 1 unidad por Transferencia
+  useSeparateChannels: boolean;// Si es false, usa la misma tasa para Efectivo y Transferencia
+  updatedAt: string;
+  note?: string;
+}
+
+export interface ExchangeRateLogEntry {
+  id: string;
+  timestamp: string;
+  currencyCode: string;
+  previousEfectivo: number;
+  newEfectivo: number;
+  previousTransferencia: number;
+  newTransferencia: number;
+  note?: string;
+}
+
+export interface ExchangeOperationRecord {
+  id: string;
+  timestamp: string;
+  date: string;
+  monthKey: string;
+  fromCurrency: string;
+  fromMethod: PaymentMethod;
+  fromAmount: number;
+  toCurrency: string;
+  toMethod: PaymentMethod;
+  toAmount: number;
+  effectiveCupRate: number;
+  appliedToLedgers: boolean;
+  note?: string;
+}
+
+export interface ExchangeControlState {
+  baseCurrency: 'CUP';
+  rates: Record<string, ManualCurrencyRate>;
+  rateHistory: ExchangeRateLogEntry[];
+  operations: ExchangeOperationRecord[];
 }
 
 export interface UserProfile {
@@ -179,5 +224,7 @@ export interface AppDatabase {
   months: Record<string, MonthRecord>;
   // Multi-currency parallel workspaces (CUP, USD, MLC, EUR, etc.)
   currencyWorkspaces: Record<string, CurrencyLedgerWorkspace>;
+  // 100% offline manual exchange board using CUP as native base currency
+  exchangeControl: ExchangeControlState;
   historyLog: HistoricalEvent[];
 }

@@ -13,11 +13,13 @@ import {
   AppDatabase,
   CurrencyLedgerWorkspace,
   EntryType,
+  ExchangeControlState,
   HistoricalEvent,
   InvestmentCategory,
   InvestmentDefinition,
   KakeiboPillar,
   LedgerEntry,
+  ManualCurrencyRate,
   MonthAllocations,
   MonthRecord,
   MonthReflection,
@@ -98,6 +100,28 @@ export function createEmptyCurrencyWorkspace(code: string): CurrencyLedgerWorksp
   };
 }
 
+export function createInitialExchangeControl(nowIso?: string): ExchangeControlState {
+  const now = nowIso || new Date().toISOString();
+  const makeEmptyRate = (code: string): ManualCurrencyRate => ({
+    currencyCode: code,
+    rateEfectivo: 0,
+    rateTransferencia: 0,
+    useSeparateChannels: false,
+    updatedAt: now,
+  });
+
+  return {
+    baseCurrency: 'CUP',
+    rates: {
+      USD: makeEmptyRate('USD'),
+      MLC: makeEmptyRate('MLC'),
+      EUR: makeEmptyRate('EUR'),
+    },
+    rateHistory: [],
+    operations: [],
+  };
+}
+
 export function createInitialDatabaseCore(opts?: {
   demoUsed?: boolean;
   demoResetUsed?: boolean;
@@ -131,6 +155,7 @@ export function createInitialDatabaseCore(opts?: {
       CUP: cupWs,
       USD: usdWs,
     },
+    exchangeControl: createInitialExchangeControl(now),
     historyLog: [
       {
         id: generateId(),
@@ -288,6 +313,59 @@ export function normalizeDatabaseCore(raw: Partial<AppDatabase>): AppDatabase {
 
   if (!db.profile.enabledCurrencies.includes(db.profile.currencyCode)) {
     db.profile.currencyCode = db.profile.enabledCurrencies[0] || 'CUP';
+  }
+
+  // Normalize 100% offline ExchangeControlState (Base CUP)
+  if (!db.exchangeControl || typeof db.exchangeControl !== 'object') {
+    db.exchangeControl = createInitialExchangeControl(now);
+  } else {
+    db.exchangeControl.baseCurrency = 'CUP';
+    if (!db.exchangeControl.rates || typeof db.exchangeControl.rates !== 'object') {
+      db.exchangeControl.rates = {};
+    }
+    if (!Array.isArray(db.exchangeControl.rateHistory)) {
+      db.exchangeControl.rateHistory = [];
+    }
+    if (!Array.isArray(db.exchangeControl.operations)) {
+      db.exchangeControl.operations = [];
+    }
+
+    const defaultBoardCodes = Array.from(
+      new Set([
+        'USD',
+        'MLC',
+        'EUR',
+        ...db.profile.enabledCurrencies.filter((c) => c !== 'CUP'),
+        ...Object.keys(db.exchangeControl.rates),
+      ])
+    ).filter((c) => c && c !== 'CUP');
+
+    for (const code of defaultBoardCodes) {
+      const existing = db.exchangeControl.rates[code];
+      if (!existing) {
+        db.exchangeControl.rates[code] = {
+          currencyCode: code,
+          rateEfectivo: 0,
+          rateTransferencia: 0,
+          useSeparateChannels: false,
+          updatedAt: now,
+        };
+      } else {
+        const ef = round2(Math.max(0, Number(existing.rateEfectivo) || 0));
+        const useSep = Boolean(existing.useSeparateChannels);
+        const tr = useSep
+          ? round2(Math.max(0, Number(existing.rateTransferencia) || 0))
+          : ef;
+        db.exchangeControl.rates[code] = {
+          currencyCode: code,
+          rateEfectivo: ef,
+          rateTransferencia: tr,
+          useSeparateChannels: useSep,
+          updatedAt: existing.updatedAt || now,
+          note: existing.note,
+        };
+      }
+    }
   }
 
   db.version = 2;
@@ -1232,6 +1310,48 @@ export function applyStartOneTimeDemo(db: AppDatabase): AppDatabase {
       CUP: cupWs,
       USD: usdWs,
     },
+    exchangeControl: {
+      baseCurrency: 'CUP',
+      rates: {
+        USD: {
+          currencyCode: 'USD',
+          rateEfectivo: 330,
+          rateTransferencia: 325,
+          useSeparateChannels: true,
+          updatedAt: now,
+          note: 'Tasa de ejemplo Demo',
+        },
+        MLC: {
+          currencyCode: 'MLC',
+          rateEfectivo: 270,
+          rateTransferencia: 270,
+          useSeparateChannels: false,
+          updatedAt: now,
+          note: 'Tasa de ejemplo Demo',
+        },
+        EUR: {
+          currencyCode: 'EUR',
+          rateEfectivo: 345,
+          rateTransferencia: 345,
+          useSeparateChannels: false,
+          updatedAt: now,
+          note: 'Tasa de ejemplo Demo',
+        },
+      },
+      rateHistory: [
+        {
+          id: generateId(),
+          timestamp: now,
+          currencyCode: 'USD',
+          previousEfectivo: 325,
+          newEfectivo: 330,
+          previousTransferencia: 320,
+          newTransferencia: 325,
+          note: 'Ejemplo de registro histórico local de tasas',
+        },
+      ],
+      operations: [],
+    },
     historyLog: [
       {
         id: generateId(),
@@ -1270,4 +1390,262 @@ export function applyExitDemoReset(db: AppDatabase): AppDatabase {
   });
 
   return syncActiveWorkspaceMirrors(fresh);
+}
+
+export function applyUpdateExchangeRate(
+  db: AppDatabase,
+  payload: {
+    currencyCode: string;
+    rateEfectivo: number;
+    rateTransferencia?: number;
+    useSeparateChannels?: boolean;
+    note?: string;
+  }
+): AppDatabase {
+  const code = findCurrencyOption(payload.currencyCode).code;
+  if (code === 'CUP') {
+    throw new Error('CUP es la moneda nativa base (1 CUP = 1 CUP).');
+  }
+
+  if (!db.exchangeControl) {
+    db.exchangeControl = createInitialExchangeControl();
+  }
+
+  const now = new Date().toISOString();
+  const prev = db.exchangeControl.rates[code];
+  const prevEf = prev ? round2(prev.rateEfectivo || 0) : 0;
+  const prevTr = prev ? round2(prev.rateTransferencia || 0) : 0;
+
+  const useSep = Boolean(payload.useSeparateChannels);
+  const nextEf = round2(Math.max(0, Number(payload.rateEfectivo) || 0));
+  const nextTr = useSep
+    ? round2(
+        Math.max(
+          0,
+          payload.rateTransferencia !== undefined
+            ? Number(payload.rateTransferencia) || 0
+            : nextEf
+        )
+      )
+    : nextEf;
+
+  db.exchangeControl.rates[code] = {
+    currencyCode: code,
+    rateEfectivo: nextEf,
+    rateTransferencia: nextTr,
+    useSeparateChannels: useSep,
+    updatedAt: now,
+    note: payload.note?.trim() || undefined,
+  };
+
+  if (Math.abs(prevEf - nextEf) >= 0.01 || Math.abs(prevTr - nextTr) >= 0.01) {
+    db.exchangeControl.rateHistory.unshift({
+      id: generateId(),
+      timestamp: now,
+      currencyCode: code,
+      previousEfectivo: prevEf,
+      newEfectivo: nextEf,
+      previousTransferencia: prevTr,
+      newTransferencia: nextTr,
+      note: payload.note?.trim() || undefined,
+    });
+    if (db.exchangeControl.rateHistory.length > 300) {
+      db.exchangeControl.rateHistory = db.exchangeControl.rateHistory.slice(0, 300);
+    }
+
+    appendHistoryCore(db, {
+      currencyCode: code,
+      eventType: 'exchange_rate_updated',
+      title: `Tasa manual actualizada: 1 ${code} en CUP`,
+      detail: useSep
+        ? `Efectivo: ${nextEf} CUP · Transferencia: ${nextTr} CUP`
+        : `Tasa fijada en ${nextEf} CUP por 1 ${code}`,
+      amount: nextEf,
+    });
+  }
+
+  lockDemoIfRealMutation(db);
+  return syncActiveWorkspaceMirrors(db);
+}
+
+function ensureMonthInWorkspace(ws: CurrencyLedgerWorkspace, monthKey: string): MonthRecord {
+  if (!ws.months[monthKey]) {
+    const sortedKeys = Object.keys(ws.months).sort();
+    const prevKey = sortedKeys.filter((k) => k < monthKey).pop();
+    const template = prevKey ? ws.months[prevKey] : undefined;
+    ws.months[monthKey] = createEmptyMonthCore(
+      monthKey,
+      ws.currentSalaryEfectivo,
+      ws.currentSalaryTransferencia,
+      ws.hasManutencionesDefault,
+      template
+    );
+  }
+  return ws.months[monthKey];
+}
+
+export function applyExecuteCurrencyExchange(
+  db: AppDatabase,
+  payload: {
+    monthKey: string;
+    date?: string;
+    fromCurrency: string;
+    fromMethod: PaymentMethod;
+    fromAmount: number;
+    toCurrency: string;
+    toMethod: PaymentMethod;
+    toAmount: number;
+    effectiveCupRate: number;
+    alsoSaveRate?: boolean;
+    applyToLedgers: boolean;
+    note?: string;
+  }
+): AppDatabase {
+  const fromOpt = findCurrencyOption(payload.fromCurrency);
+  const toOpt = findCurrencyOption(payload.toCurrency);
+
+  if (fromOpt.code === toOpt.code) {
+    throw new Error(
+      'Selecciona dos monedas distintas (para cambiar Efectivo ⇄ Transferencia en la misma moneda usa el Libro Diario).'
+    );
+  }
+
+  const fromAmt = round2(Math.abs(Number(payload.fromAmount) || 0));
+  const toAmt = round2(Math.abs(Number(payload.toAmount) || 0));
+  const cupRate = round2(Math.max(0, Number(payload.effectiveCupRate) || 0));
+
+  if (fromAmt <= 0 || toAmt <= 0) {
+    throw new Error('Los montos a convertir deben ser mayores a cero.');
+  }
+
+  const fromMethod: PaymentMethod =
+    payload.fromMethod === 'transferencia' ? 'transferencia' : 'efectivo';
+  const toMethod: PaymentMethod =
+    payload.toMethod === 'transferencia' ? 'transferencia' : 'efectivo';
+
+  const now = new Date().toISOString();
+  const monthKey = payload.monthKey || getCurrentMonthKey();
+  const entryDate =
+    payload.date && /^\d{4}-\d{2}-\d{2}$/.test(payload.date)
+      ? payload.date
+      : getTodayDateString().startsWith(monthKey)
+      ? getTodayDateString()
+      : `${monthKey}-01`;
+
+  if (!db.exchangeControl) {
+    db.exchangeControl = createInitialExchangeControl(now);
+  }
+
+  if (payload.alsoSaveRate && cupRate > 0) {
+    const foreignCode =
+      fromOpt.code !== 'CUP' ? fromOpt.code : toOpt.code !== 'CUP' ? toOpt.code : null;
+    if (foreignCode) {
+      const existing = db.exchangeControl.rates[foreignCode];
+      const foreignMethod = fromOpt.code === foreignCode ? fromMethod : toMethod;
+      if (existing && existing.useSeparateChannels) {
+        applyUpdateExchangeRate(db, {
+          currencyCode: foreignCode,
+          rateEfectivo: foreignMethod === 'efectivo' ? cupRate : existing.rateEfectivo,
+          rateTransferencia:
+            foreignMethod === 'transferencia' ? cupRate : existing.rateTransferencia,
+          useSeparateChannels: true,
+          note: payload.note,
+        });
+      } else {
+        applyUpdateExchangeRate(db, {
+          currencyCode: foreignCode,
+          rateEfectivo: cupRate,
+          useSeparateChannels: false,
+          note: payload.note,
+        });
+      }
+    }
+  }
+
+  if (payload.applyToLedgers) {
+    for (const c of [fromOpt.code, toOpt.code]) {
+      if (!db.profile.enabledCurrencies.includes(c)) {
+        db.profile.enabledCurrencies.push(c);
+      }
+      if (!db.currencyWorkspaces[c]) {
+        db.currencyWorkspaces[c] = createEmptyCurrencyWorkspace(c);
+      }
+    }
+
+    const fromWs = db.currencyWorkspaces[fromOpt.code];
+    const toWs = db.currencyWorkspaces[toOpt.code];
+    const fromMonth = ensureMonthInWorkspace(fromWs, monthKey);
+    const toMonth = ensureMonthInWorkspace(toWs, monthKey);
+
+    const rateNote =
+      cupRate > 0 ? `Tasa base CUP: ${cupRate}` : 'Cambio directo entre libretas';
+    const fullNote = payload.note?.trim()
+      ? `${rateNote} · ${payload.note.trim()}`
+      : rateNote;
+
+    fromMonth.entries.push({
+      id: generateId(),
+      monthKey,
+      date: entryDate,
+      createdAt: now,
+      type: 'adjustment_down',
+      amount: fromAmt,
+      paymentMethod: fromMethod,
+      concept: `Cambio de moneda entregado: -${fromAmt} ${fromOpt.code} → +${toAmt} ${toOpt.code}`,
+      division: 'general',
+      pillar: 'traspaso',
+      note: fullNote,
+    });
+    fromMonth.updatedAt = now;
+
+    toMonth.entries.push({
+      id: generateId(),
+      monthKey,
+      date: entryDate,
+      createdAt: now,
+      type: 'adjustment_up',
+      amount: toAmt,
+      paymentMethod: toMethod,
+      concept: `Cambio de moneda recibido: +${toAmt} ${toOpt.code} (desde ${fromAmt} ${fromOpt.code})`,
+      division: 'general',
+      pillar: 'traspaso',
+      note: fullNote,
+    });
+    toMonth.updatedAt = now;
+  }
+
+  db.exchangeControl.operations.unshift({
+    id: generateId(),
+    timestamp: now,
+    date: entryDate,
+    monthKey,
+    fromCurrency: fromOpt.code,
+    fromMethod,
+    fromAmount: fromAmt,
+    toCurrency: toOpt.code,
+    toMethod,
+    toAmount: toAmt,
+    effectiveCupRate: cupRate,
+    appliedToLedgers: Boolean(payload.applyToLedgers),
+    note: payload.note?.trim() || undefined,
+  });
+  if (db.exchangeControl.operations.length > 300) {
+    db.exchangeControl.operations = db.exchangeControl.operations.slice(0, 300);
+  }
+
+  appendHistoryCore(db, {
+    monthKey,
+    currencyCode: fromOpt.code,
+    eventType: 'currency_exchanged',
+    title: payload.applyToLedgers
+      ? `Cambio aplicado en libretas: ${fromAmt} ${fromOpt.code} → ${toAmt} ${toOpt.code}`
+      : `Conversión registrada: ${fromAmt} ${fromOpt.code} → ${toAmt} ${toOpt.code}`,
+    detail: `Salida (${fromMethod === 'transferencia' ? 'Transf.' : 'Efectivo'}) → Entrada (${
+      toMethod === 'transferencia' ? 'Transf.' : 'Efectivo'
+    })${cupRate > 0 ? ` · Tasa: ${cupRate} CUP` : ''}`,
+    amount: toAmt,
+  });
+
+  lockDemoIfRealMutation(db);
+  return syncActiveWorkspaceMirrors(db);
 }

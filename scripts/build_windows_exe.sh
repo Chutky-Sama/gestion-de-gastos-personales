@@ -21,7 +21,7 @@ elif python3 -c "import ziglang" >/dev/null 2>&1; then
 else
   echo "Instalando compilador cruzado ziglang en /tmp/zigenv..."
   python3 -m venv /tmp/zigenv
-  /tmp/zigenv/bin/pip install --quiet ziglang
+  /tmp/zigenv/bin/pip install --quiet ziglang pillow
   ZIG_CMD="/tmp/zigenv/bin/python -m ziglang"
 fi
 

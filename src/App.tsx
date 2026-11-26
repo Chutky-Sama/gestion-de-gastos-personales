@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ArrowDownRight,
+  ArrowLeftRight,
   ArrowUpRight,
   Banknote,
   BookOpen,
@@ -34,6 +35,7 @@ import {
 import { AppDatabase, PaymentMethod } from '../shared/types';
 import { DesktopInfo, api } from './api';
 import { AdjustBalanceModal } from './components/AdjustBalanceModal';
+import { CurrencyExchangeTab } from './components/CurrencyExchangeTab';
 import { EnvelopesTab } from './components/EnvelopesTab';
 import { HistoryTab } from './components/HistoryTab';
 import { InvestmentsTab } from './components/InvestmentsTab';
@@ -41,7 +43,7 @@ import { LedgerTab } from './components/LedgerTab';
 import { SalaryQuickModal } from './components/SalaryQuickModal';
 import { formatMoney } from './utils/format';
 
-type ActiveTab = 'ledger' | 'envelopes' | 'investments' | 'history';
+type ActiveTab = 'ledger' | 'envelopes' | 'investments' | 'exchange' | 'history';
 
 export const App: React.FC = () => {
   const [db, setDb] = useState<AppDatabase | null>(null);
@@ -153,10 +155,13 @@ export const App: React.FC = () => {
 
   if (loading) {
     return (
-      <div className="app-shell" style={{ textAlign: 'center', paddingTop: '120px' }}>
-        <div className="brand-seal" style={{ margin: '0 auto 16px' }}>
-          家計
-        </div>
+      <div className="app-shell" style={{ textAlign: 'center', paddingTop: '110px' }}>
+        <img
+          src="/icon-256.png"
+          alt="Sello personal"
+          className="personal-seal-img"
+          style={{ width: '84px', height: '84px', margin: '0 auto 16px', display: 'block' }}
+        />
         <h2 style={{ margin: '0 0 8px' }}>Abriendo tu Libreta Kakeibo...</h2>
         <p style={{ color: 'var(--text-secondary)' }}>
           Cargando saldos en paralelo (Efectivo y Transferencia) desde el Día 1
@@ -193,7 +198,11 @@ export const App: React.FC = () => {
       {/* Top Bar */}
       <header className="topbar">
         <div className="brand-cluster">
-          <div className="brand-seal">家計</div>
+          <img
+            src="/icon-256.png"
+            alt="Mi Sello Personal"
+            className="personal-seal-img"
+          />
           <div className="brand-title">
             <h1>
               {db.profile.ledgerName}
@@ -633,6 +642,15 @@ export const App: React.FC = () => {
 
         <button
           type="button"
+          className={`nav-tab ${activeTab === 'exchange' ? 'active' : ''}`}
+          onClick={() => setActiveTab('exchange')}
+        >
+          <ArrowLeftRight size={17} />
+          Cambio de Monedas (CUP)
+        </button>
+
+        <button
+          type="button"
           className={`nav-tab ${activeTab === 'history' ? 'active' : ''}`}
           onClick={() => setActiveTab('history')}
         >
@@ -755,6 +773,31 @@ export const App: React.FC = () => {
                   paymentMethod === 'transferencia' ? 'Transferencia' : 'Efectivo'
                 })`
               );
+            }}
+          />
+        )}
+
+        {activeTab === 'exchange' && (
+          <CurrencyExchangeTab
+            db={db}
+            activeMonthKey={activeMonth.monthKey}
+            onUpdateRate={async (payload) => {
+              const next = await api.updateExchangeRate(payload);
+              setDb(next);
+              showToast(`Tasa de ${payload.currencyCode} guardada en CUP`);
+            }}
+            onExecuteExchange={async (payload) => {
+              const next = await api.executeCurrencyExchange(payload);
+              setDb(next);
+              showToast(
+                payload.applyToLedgers
+                  ? `Cambio aplicado: -${payload.fromAmount} ${payload.fromCurrency} → +${payload.toAmount} ${payload.toCurrency}`
+                  : 'Conversión registrada en tu bitácora local'
+              );
+            }}
+            onSwitchToCurrencyLedger={(code) => {
+              handleSelectCurrency(code);
+              setActiveTab('ledger');
             }}
           />
         )}
