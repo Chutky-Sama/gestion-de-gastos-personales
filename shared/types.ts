@@ -8,6 +8,10 @@ export type CoreDivisionId =
 
 export type DivisionId = CoreDivisionId | string;
 
+export type PaymentMethod = 'efectivo' | 'transferencia';
+
+export type TransferDirection = 'transf_to_cash' | 'cash_to_transf';
+
 export type InvestmentCategory =
   | 'acciones_etf'
   | 'cripto'
@@ -15,6 +19,7 @@ export type InvestmentCategory =
   | 'negocio'
   | 'bienes_raices'
   | 'ahorro_meta'
+  | 'divisas'
   | 'otro';
 
 export type KakeiboPillar =
@@ -24,13 +29,15 @@ export type KakeiboPillar =
   | 'imprevisto'    // 特別 · Emergencia / Extra
   | 'patrimonio'    // 資産 · Inversión / Deuda
   | 'ingreso'       // 収入 · Entrada de dinero
-  | 'ajuste';       // 調整 · Arqueo / Ajuste de saldo
+  | 'ajuste'        // 調整 · Arqueo / Ajuste de saldo
+  | 'traspaso';     // 振替 · Cambio entre Efectivo y Transferencia
 
 export type EntryType =
-  | 'income'          // (+) Entrada / Ingreso adicional al mes
-  | 'expense'         // (-) Gasto / Pago / Aporte ejecutado
-  | 'adjustment_up'   // (+) Ajuste manual al alza del dinero general
-  | 'adjustment_down';// (-) Ajuste manual a la baja del dinero general
+  | 'income'           // (+) Entrada / Ingreso adicional al mes
+  | 'expense'          // (-) Gasto / Pago / Aporte ejecutado
+  | 'adjustment_up'    // (+) Ajuste manual al alza
+  | 'adjustment_down'  // (-) Ajuste manual a la baja
+  | 'channel_transfer';// (⇄) Paso de dinero entre Efectivo y Transferencia
 
 export interface SubItem {
   id: string;
@@ -60,9 +67,12 @@ export interface LedgerEntry {
   id: string;
   monthKey: string; // YYYY-MM
   date: string;     // YYYY-MM-DD
-  createdAt: string; // ISO string for exact chronological order
+  createdAt: string;
   type: EntryType;
-  amount: number;   // Positive number
+  amount: number;   // Positive number (monto principal)
+  paymentMethod: PaymentMethod;
+  transferDirection?: TransferDirection; // Para type === 'channel_transfer'
+  transferFee?: number;                  // Comisión o descuento al cambiar efectivo <-> transferencia
   concept: string;
   division: DivisionId;
   investmentId?: string;
@@ -72,6 +82,10 @@ export interface LedgerEntry {
 
 export interface LedgerEntryWithBalance extends LedgerEntry {
   signedAmount: number;
+  efectivoDelta: number;
+  transferenciaDelta: number;
+  runningEfectivo: number;
+  runningTransferencia: number;
   runningBalance: number;
 }
 
@@ -96,7 +110,11 @@ export interface MonthReflection {
 export interface MonthRecord {
   monthKey: string; // YYYY-MM
   salary: number;
+  salaryEfectivo: number;
+  salaryTransferencia: number;
   carryover: number;
+  carryoverEfectivo: number;
+  carryoverTransferencia: number;
   hasManutenciones: boolean;
   allocations: MonthAllocations;
   reflection: MonthReflection;
@@ -105,10 +123,22 @@ export interface MonthRecord {
   updatedAt: string;
 }
 
+export interface CurrencyLedgerWorkspace {
+  currencyCode: string;
+  currencySymbol: string;
+  currentSalary: number;
+  currentSalaryEfectivo: number;
+  currentSalaryTransferencia: number;
+  hasManutencionesDefault: boolean;
+  investments: InvestmentDefinition[];
+  months: Record<string, MonthRecord>;
+}
+
 export interface HistoricalEvent {
   id: string;
   timestamp: string;
   monthKey?: string;
+  currencyCode?: string;
   eventType:
     | 'first_day'
     | 'salary_updated'
@@ -116,6 +146,9 @@ export interface HistoricalEvent {
     | 'investment_created'
     | 'investment_removed'
     | 'balance_adjusted'
+    | 'channel_transfer'
+    | 'demo_started'
+    | 'demo_exited'
     | 'backup_restored';
   title: string;
   detail: string;
@@ -124,9 +157,12 @@ export interface HistoricalEvent {
 
 export interface UserProfile {
   ledgerName: string;
-  currencyCode: string;
-  currencySymbol: string;
+  currencyCode: string;     // Active currency code (e.g. 'CUP', 'USD')
+  currencySymbol: string;   // Active currency symbol
+  enabledCurrencies: string[]; // e.g. ['CUP', 'USD']
   currentSalary: number;
+  currentSalaryEfectivo: number;
+  currentSalaryTransferencia: number;
   hasManutencionesDefault: boolean;
 }
 
@@ -134,8 +170,14 @@ export interface AppDatabase {
   version: number;
   firstUseDate: string;
   lastUpdatedAt: string;
+  demoUsed: boolean;
+  isDemoActive: boolean;
+  demoResetUsed: boolean;
   profile: UserProfile;
+  // Active currency mirror fields for convenient reading
   investments: InvestmentDefinition[];
   months: Record<string, MonthRecord>;
+  // Multi-currency parallel workspaces (CUP, USD, MLC, EUR, etc.)
+  currencyWorkspaces: Record<string, CurrencyLedgerWorkspace>;
   historyLog: HistoricalEvent[];
 }

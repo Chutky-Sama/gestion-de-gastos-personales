@@ -1,14 +1,17 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   ArrowDownRight,
+  ArrowLeftRight,
   ArrowUpDown,
   ArrowUpRight,
+  Banknote,
   BookOpen,
   Check,
   Edit3,
   Plus,
   Search,
   SlidersHorizontal,
+  Smartphone,
   Sparkles,
   Trash2,
   X,
@@ -23,6 +26,8 @@ import {
   KakeiboPillar,
   LedgerEntry,
   MonthRecord,
+  PaymentMethod,
+  TransferDirection,
 } from '../../shared/types';
 import {
   KAKEIBO_PILLARS,
@@ -37,10 +42,14 @@ interface LedgerTabProps {
   summary: MonthComputedSummary;
   investments: InvestmentDefinition[];
   currencySymbol: string;
+  currencyCode: string;
   onAddEntry: (payload: {
     date: string;
     type: EntryType;
     amount: number;
+    paymentMethod: PaymentMethod;
+    transferDirection?: TransferDirection;
+    transferFee?: number;
     concept: string;
     division: string;
     investmentId?: string;
@@ -53,6 +62,9 @@ interface LedgerTabProps {
       date?: string;
       type?: EntryType;
       amount?: number;
+      paymentMethod?: PaymentMethod;
+      transferDirection?: TransferDirection;
+      transferFee?: number;
       concept?: string;
       division?: string;
       investmentId?: string;
@@ -71,6 +83,7 @@ export const LedgerTab: React.FC<LedgerTabProps> = ({
   summary,
   investments,
   currencySymbol,
+  currencyCode,
   onAddEntry,
   onUpdateEntry,
   onDeleteEntry,
@@ -84,8 +97,12 @@ export const LedgerTab: React.FC<LedgerTabProps> = ({
     return `${month.monthKey}-01`;
   }, [month.monthKey]);
 
-  // Quick composer state
-  const [entryMode, setEntryMode] = useState<'expense' | 'income'>('expense');
+  const [entryMode, setEntryMode] = useState<'expense' | 'income' | 'channel_transfer'>('expense');
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('efectivo');
+  const [transferDirection, setTransferDirection] =
+    useState<TransferDirection>('transf_to_cash');
+  const [transferFeeStr, setTransferFeeStr] = useState('');
+
   const [concept, setConcept] = useState('');
   const [amountStr, setAmountStr] = useState('');
   const [division, setDivision] = useState<string>('hogar');
@@ -96,22 +113,21 @@ export const LedgerTab: React.FC<LedgerTabProps> = ({
   const [showNoteField, setShowNoteField] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
-  // Filters & sorting
   const [searchQuery, setSearchQuery] = useState('');
   const [filterDivision, setFilterDivision] = useState('all');
-  const [orderAsc, setOrderAsc] = useState(true); // Classic Asian ledger order top-to-bottom
+  const [filterChannel, setFilterChannel] = useState<'all' | 'efectivo' | 'transferencia'>('all');
+  const [orderAsc, setOrderAsc] = useState(true);
 
-  // Editing row state
   const [editingEntry, setEditingEntry] = useState<LedgerEntry | null>(null);
   const [editConcept, setEditConcept] = useState('');
   const [editAmountStr, setEditAmountStr] = useState('');
+  const [editPaymentMethod, setEditPaymentMethod] = useState<PaymentMethod>('efectivo');
   const [editDate, setEditDate] = useState('');
   const [editDivision, setEditDivision] = useState('');
   const [editInvestmentId, setEditInvestmentId] = useState('');
   const [editPillar, setEditPillar] = useState<KakeiboPillar>('supervivencia');
   const [editNote, setEditNote] = useState('');
 
-  // Reflection state
   const [howMuchCanISave, setHowMuchCanISave] = useState(month.reflection.howMuchCanISave || '');
   const [improvementPlan, setImprovementPlan] = useState(month.reflection.improvementPlan || '');
   const [closingNotes, setClosingNotes] = useState(month.reflection.closingNotes || '');
@@ -129,10 +145,7 @@ export const LedgerTab: React.FC<LedgerTabProps> = ({
     setMood(month.reflection.mood || '');
   }, [month.monthKey, month.reflection]);
 
-  const activeInvestments = useMemo(
-    () => investments.filter((i) => i.active),
-    [investments]
-  );
+  const activeInvestments = useMemo(() => investments.filter((i) => i.active), [investments]);
 
   useEffect(() => {
     if (division === 'inversiones' && !investmentId && activeInvestments.length > 0) {
@@ -140,11 +153,14 @@ export const LedgerTab: React.FC<LedgerTabProps> = ({
     }
   }, [division, investmentId, activeInvestments]);
 
-  const handleModeChange = (nextMode: 'expense' | 'income') => {
+  const handleModeChange = (nextMode: 'expense' | 'income' | 'channel_transfer') => {
     setEntryMode(nextMode);
     if (nextMode === 'income') {
       setDivision('general');
       setPillar('ingreso');
+    } else if (nextMode === 'channel_transfer') {
+      setDivision('bolsillo');
+      setPillar('traspaso');
     } else {
       setDivision('hogar');
       setPillar('supervivencia');
@@ -165,7 +181,17 @@ export const LedgerTab: React.FC<LedgerTabProps> = ({
   const handleSubmitEntry = async (e: React.FormEvent) => {
     e.preventDefault();
     const numeric = parseFloat(amountStr);
-    if (Number.isNaN(numeric) || numeric <= 0 || !concept.trim()) return;
+    if (Number.isNaN(numeric) || numeric <= 0) return;
+
+    const defaultConcept =
+      entryMode === 'channel_transfer'
+        ? transferDirection === 'transf_to_cash'
+          ? 'Extracción / Cambio de Transferencia a Efectivo'
+          : 'Depósito / Paso de Efectivo a Transferencia'
+        : '';
+
+    const finalConcept = concept.trim() || defaultConcept;
+    if (!finalConcept) return;
 
     setSubmitting(true);
     try {
@@ -173,14 +199,34 @@ export const LedgerTab: React.FC<LedgerTabProps> = ({
         date,
         type: entryMode,
         amount: numeric,
-        concept: concept.trim(),
-        division: entryMode === 'income' ? 'general' : division,
-        investmentId: division === 'inversiones' ? investmentId || undefined : undefined,
-        pillar: entryMode === 'income' ? 'ingreso' : pillar,
+        paymentMethod,
+        transferDirection: entryMode === 'channel_transfer' ? transferDirection : undefined,
+        transferFee:
+          entryMode === 'channel_transfer'
+            ? Math.max(0, parseFloat(transferFeeStr) || 0)
+            : undefined,
+        concept: finalConcept,
+        division:
+          entryMode === 'income'
+            ? 'general'
+            : entryMode === 'channel_transfer'
+            ? 'bolsillo'
+            : division,
+        investmentId:
+          entryMode === 'expense' && division === 'inversiones'
+            ? investmentId || undefined
+            : undefined,
+        pillar:
+          entryMode === 'income'
+            ? 'ingreso'
+            : entryMode === 'channel_transfer'
+            ? 'traspaso'
+            : pillar,
         note: note.trim() || undefined,
       });
       setConcept('');
       setAmountStr('');
+      setTransferFeeStr('');
       setNote('');
     } finally {
       setSubmitting(false);
@@ -191,6 +237,7 @@ export const LedgerTab: React.FC<LedgerTabProps> = ({
     setEditingEntry(entry);
     setEditConcept(entry.concept);
     setEditAmountStr(String(entry.amount));
+    setEditPaymentMethod(entry.paymentMethod || 'efectivo');
     setEditDate(entry.date);
     setEditDivision(entry.division);
     setEditInvestmentId(entry.investmentId || '');
@@ -207,6 +254,7 @@ export const LedgerTab: React.FC<LedgerTabProps> = ({
     await onUpdateEntry(editingEntry.id, {
       concept: editConcept.trim() || editingEntry.concept,
       amount: numeric,
+      paymentMethod: editPaymentMethod,
       date: editDate,
       division: editDivision,
       investmentId: editDivision === 'inversiones' ? editInvestmentId || undefined : undefined,
@@ -240,6 +288,11 @@ export const LedgerTab: React.FC<LedgerTabProps> = ({
     const base = orderAsc ? summary.ledgerAscending : summary.ledgerDescending;
     return base.filter((row) => {
       if (filterDivision !== 'all' && row.division !== filterDivision) return false;
+      if (filterChannel !== 'all') {
+        if (row.type !== 'channel_transfer' && row.paymentMethod !== filterChannel) {
+          return false;
+        }
+      }
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase();
         const invName = row.investmentId ? invNameMap.get(row.investmentId) || '' : '';
@@ -251,7 +304,7 @@ export const LedgerTab: React.FC<LedgerTabProps> = ({
       }
       return true;
     });
-  }, [summary, orderAsc, filterDivision, searchQuery, invNameMap]);
+  }, [summary, orderAsc, filterDivision, filterChannel, searchQuery, invNameMap]);
 
   const activeEnvelopeList = [
     summary.envelopes.hogar,
@@ -310,194 +363,331 @@ export const LedgerTab: React.FC<LedgerTabProps> = ({
                   style={{ width: `${Math.min(100, Math.max(0, env.percentUsed))}%` }}
                 />
               </div>
+              {env.spent > 0 && (
+                <div
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    fontSize: '0.69rem',
+                    color: 'var(--text-muted)',
+                  }}
+                  className="mono"
+                >
+                  <span>Efec: {formatMoney(env.spentEfectivo, currencySymbol)}</span>
+                  <span>Transf: {formatMoney(env.spentTransferencia, currencySymbol)}</span>
+                </div>
+              )}
             </div>
           );
         })}
       </div>
 
-      {/* Quick Entry Composer */}
+      {/* Quick Entry Composer with Parallel Efectivo / Transferencia */}
       <div className="composer-panel">
         <div className="composer-top">
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
             <div className="type-switch">
               <button
                 type="button"
                 className={`type-switch-btn ${entryMode === 'expense' ? 'active-expense' : ''}`}
                 onClick={() => handleModeChange('expense')}
               >
-                <ArrowDownRight size={16} /> Registrar Gasto / Salida (-)
+                <ArrowDownRight size={15} /> Gasto (-)
               </button>
               <button
                 type="button"
                 className={`type-switch-btn ${entryMode === 'income' ? 'active-income' : ''}`}
                 onClick={() => handleModeChange('income')}
               >
-                <ArrowUpRight size={16} /> Registrar Ingreso Extra (+)
+                <ArrowUpRight size={15} /> Ingreso (+)
+              </button>
+              <button
+                type="button"
+                className={`type-switch-btn ${
+                  entryMode === 'channel_transfer' ? 'active-transfer' : ''
+                }`}
+                onClick={() => handleModeChange('channel_transfer')}
+              >
+                <ArrowLeftRight size={15} /> Pasar Efectivo ⇄ Transf.
               </button>
             </div>
+
+            {entryMode !== 'channel_transfer' && (
+              <div className="type-switch" title="Elige si fue en Efectivo o por Transferencia">
+                <button
+                  type="button"
+                  className={`type-switch-btn ${
+                    paymentMethod === 'efectivo' ? 'active-income' : ''
+                  }`}
+                  onClick={() => setPaymentMethod('efectivo')}
+                >
+                  <Banknote size={15} /> Efectivo
+                </button>
+                <button
+                  type="button"
+                  className={`type-switch-btn ${
+                    paymentMethod === 'transferencia' ? 'active-transfer' : ''
+                  }`}
+                  onClick={() => setPaymentMethod('transferencia')}
+                >
+                  <Smartphone size={15} /> Transferencia
+                </button>
+              </div>
+            )}
 
             <button
               type="button"
               className="btn btn-sm btn-ghost"
               onClick={() => setShowNoteField((v) => !v)}
             >
-              {showNoteField ? 'Ocultar nota' : '+ Añadir nota consciente'}
+              {showNoteField ? 'Ocultar nota' : '+ Nota'}
             </button>
           </div>
 
-          <button
-            type="button"
-            className="btn btn-sm btn-cyan"
-            onClick={onOpenAdjustModal}
-          >
-            <SlidersHorizontal size={14} /> Ajustar Dinero General (+/-)
+          <button type="button" className="btn btn-sm btn-cyan" onClick={onOpenAdjustModal}>
+            <SlidersHorizontal size={14} /> Ajustar Efectivo / Transf.
           </button>
         </div>
 
         <form onSubmit={handleSubmitEntry}>
-          <div className="composer-grid">
-            <div>
-              <label className="field-label">Concepto / Descripción</label>
-              <input
-                type="text"
-                required
-                className="neon-input"
-                placeholder={
-                  entryMode === 'income'
-                    ? 'Ej. Pago extra, bono, venta, reembolso...'
-                    : 'Ej. Supermercado, cuota tarjeta, aporte ETF, salida...'
-                }
-                value={concept}
-                onChange={(e) => setConcept(e.target.value)}
-              />
-            </div>
-
-            <div>
-              <label className="field-label">Monto ({currencySymbol})</label>
-              <input
-                type="number"
-                step="0.01"
-                min="0.01"
-                required
-                className="neon-input mono-input"
-                placeholder="0.00"
-                value={amountStr}
-                onChange={(e) => setAmountStr(e.target.value)}
-              />
-            </div>
-
-            {entryMode === 'expense' ? (
+          {entryMode === 'channel_transfer' ? (
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: '1.6fr 1fr 1fr 1.6fr 1fr auto',
+                gap: '12px',
+                alignItems: 'end',
+              }}
+              className="composer-transfer-grid"
+            >
               <div>
-                <label className="field-label">Parte / Sobre</label>
+                <label className="field-label">Dirección del cambio</label>
                 <select
                   className="neon-select"
-                  value={division}
-                  onChange={(e) => handleDivisionChange(e.target.value)}
+                  value={transferDirection}
+                  onChange={(e) => setTransferDirection(e.target.value as TransferDirection)}
                 >
-                  <option value="hogar">Gastos del Hogar</option>
-                  <option value="deudas">Deudas</option>
-                  {month.hasManutenciones && (
-                    <option value="manutenciones">Manutenciones</option>
-                  )}
-                  <option value="inversiones">Inversiones</option>
-                  <option value="bolsillo">Dinero de Bolsillo</option>
-                  {month.allocations.customEnvelopes.map((ce) => (
-                    <option key={ce.id} value={ce.id}>
-                      {ce.name}
-                    </option>
-                  ))}
-                  <option value="general">Dinero General (Directo)</option>
+                  <option value="transf_to_cash">
+                    Transferencia → Efectivo (Caja Extra / Cajero)
+                  </option>
+                  <option value="cash_to_transf">
+                    Efectivo → Transferencia (Depósito / Tarjeta)
+                  </option>
                 </select>
               </div>
-            ) : (
+
               <div>
-                <label className="field-label">Destino</label>
+                <label className="field-label">Monto a pasar ({currencySymbol})</label>
                 <input
-                  type="text"
-                  disabled
-                  className="neon-input"
-                  value="Suma al Dinero General (+)"
+                  type="number"
+                  step="0.01"
+                  min="0.01"
+                  required
+                  className="neon-input mono-input"
+                  placeholder="0.00"
+                  value={amountStr}
+                  onChange={(e) => setAmountStr(e.target.value)}
                 />
               </div>
-            )}
 
-            {entryMode === 'expense' && division === 'inversiones' ? (
               <div>
-                <label className="field-label">¿Cuál Inversión?</label>
-                {investments.length > 0 ? (
+                <label className="field-label">Comisión si hubo ({currencySymbol})</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  className="neon-input mono-input"
+                  placeholder="0.00"
+                  value={transferFeeStr}
+                  onChange={(e) => setTransferFeeStr(e.target.value)}
+                />
+              </div>
+
+              <div>
+                <label className="field-label">Detalle (opcional)</label>
+                <input
+                  type="text"
+                  className="neon-input"
+                  placeholder="Ej. Caja Extra bodega, cajero, cambio..."
+                  value={concept}
+                  onChange={(e) => setConcept(e.target.value)}
+                />
+              </div>
+
+              <div>
+                <label className="field-label">Fecha</label>
+                <input
+                  type="date"
+                  className="neon-input mono-input"
+                  value={date}
+                  onChange={(e) => setDate(e.target.value)}
+                />
+              </div>
+
+              <div>
+                <button
+                  type="submit"
+                  disabled={submitting}
+                  className="btn btn-cyan"
+                  style={{ height: '40px', width: '100%' }}
+                >
+                  <ArrowLeftRight size={15} /> Pasar
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="composer-grid">
+              <div>
+                <label className="field-label">
+                  Concepto ({paymentMethod === 'efectivo' ? 'En Efectivo' : 'Por Transferencia'})
+                </label>
+                <input
+                  type="text"
+                  required
+                  className="neon-input"
+                  placeholder={
+                    entryMode === 'income'
+                      ? 'Ej. Pago recibido, bono, venta...'
+                      : paymentMethod === 'efectivo'
+                      ? 'Ej. Agro, transporte, panadería (efectivo)...'
+                      : 'Ej. Electricidad, Nauta, tienda (Transfermóvil)...'
+                  }
+                  value={concept}
+                  onChange={(e) => setConcept(e.target.value)}
+                />
+              </div>
+
+              <div>
+                <label className="field-label">
+                  Monto ({currencySymbol} {currencyCode})
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0.01"
+                  required
+                  className="neon-input mono-input"
+                  placeholder="0.00"
+                  value={amountStr}
+                  onChange={(e) => setAmountStr(e.target.value)}
+                />
+              </div>
+
+              {entryMode === 'expense' ? (
+                <div>
+                  <label className="field-label">Parte / Sobre</label>
                   <select
                     className="neon-select"
-                    value={investmentId}
-                    onChange={(e) => setInvestmentId(e.target.value)}
+                    value={division}
+                    onChange={(e) => handleDivisionChange(e.target.value)}
                   >
-                    {investments.map((inv) => (
-                      <option key={inv.id} value={inv.id}>
-                        {inv.name} {!inv.active ? '(Archivada)' : ''}
+                    <option value="hogar">Gastos del Hogar</option>
+                    <option value="deudas">Deudas</option>
+                    {month.hasManutenciones && (
+                      <option value="manutenciones">Manutenciones</option>
+                    )}
+                    <option value="inversiones">Inversiones</option>
+                    <option value="bolsillo">Dinero de Bolsillo</option>
+                    {month.allocations.customEnvelopes.map((ce) => (
+                      <option key={ce.id} value={ce.id}>
+                        {ce.name}
                       </option>
                     ))}
+                    <option value="general">Dinero General (Directo)</option>
                   </select>
-                ) : (
-                  <button
-                    type="button"
-                    className="btn btn-violet"
-                    style={{ width: '100%' }}
-                    onClick={() => onNavigateTab('investments')}
+                </div>
+              ) : (
+                <div>
+                  <label className="field-label">Se suma a</label>
+                  <input
+                    type="text"
+                    disabled
+                    className="neon-input"
+                    value={
+                      paymentMethod === 'efectivo'
+                        ? 'Saldo en Efectivo (+)'
+                        : 'Saldo en Transferencia (+)'
+                    }
+                  />
+                </div>
+              )}
+
+              {entryMode === 'expense' && division === 'inversiones' ? (
+                <div>
+                  <label className="field-label">¿Cuál Inversión?</label>
+                  {investments.length > 0 ? (
+                    <select
+                      className="neon-select"
+                      value={investmentId}
+                      onChange={(e) => setInvestmentId(e.target.value)}
+                    >
+                      {investments.map((inv) => (
+                        <option key={inv.id} value={inv.id}>
+                          {inv.name} {!inv.active ? '(Archivada)' : ''}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <button
+                      type="button"
+                      className="btn btn-violet"
+                      style={{ width: '100%' }}
+                      onClick={() => onNavigateTab('investments')}
+                    >
+                      + Definir Inversiones
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <div>
+                  <label className="field-label">Pilar Kakeibo</label>
+                  <select
+                    className="neon-select"
+                    value={entryMode === 'income' ? 'ingreso' : pillar}
+                    disabled={entryMode === 'income'}
+                    onChange={(e) => setPillar(e.target.value as KakeiboPillar)}
                   >
-                    + Definir Inversiones
-                  </button>
-                )}
-              </div>
-            ) : (
+                    <option value="supervivencia">必需 · Necesidad / Supervivencia</option>
+                    <option value="opcional">娯楽 · Gusto / Opcional</option>
+                    <option value="cultura">教養 · Cultura / Salud / Mejora</option>
+                    <option value="patrimonio">資産 · Patrimonio / Deuda</option>
+                    <option value="imprevisto">特別 · Extra / Imprevisto</option>
+                    {entryMode === 'income' && <option value="ingreso">収入 · Entrada</option>}
+                  </select>
+                </div>
+              )}
+
               <div>
-                <label className="field-label">Pilar Kakeibo</label>
-                <select
-                  className="neon-select"
-                  value={entryMode === 'income' ? 'ingreso' : pillar}
-                  disabled={entryMode === 'income'}
-                  onChange={(e) => setPillar(e.target.value as KakeiboPillar)}
-                >
-                  <option value="supervivencia">必需 · Necesidad / Supervivencia</option>
-                  <option value="opcional">娯楽 · Gusto / Opcional</option>
-                  <option value="cultura">教養 · Cultura / Salud / Mejora</option>
-                  <option value="patrimonio">資産 · Patrimonio / Deuda</option>
-                  <option value="imprevisto">特別 · Extra / Imprevisto</option>
-                  {entryMode === 'income' && <option value="ingreso">収入 · Entrada</option>}
-                </select>
+                <label className="field-label">Fecha</label>
+                <input
+                  type="date"
+                  className="neon-input mono-input"
+                  value={date}
+                  onChange={(e) => setDate(e.target.value)}
+                />
               </div>
-            )}
 
-            <div>
-              <label className="field-label">Fecha</label>
-              <input
-                type="date"
-                className="neon-input mono-input"
-                value={date}
-                onChange={(e) => setDate(e.target.value)}
-              />
+              <div>
+                <button
+                  type="submit"
+                  disabled={submitting}
+                  className={`btn ${entryMode === 'income' ? 'btn-emerald' : 'btn-magenta'}`}
+                  style={{ height: '40px', width: '100%' }}
+                >
+                  <Plus size={16} />
+                  {entryMode === 'income' ? 'Sumar' : 'Anotar'}
+                </button>
+              </div>
             </div>
-
-            <div>
-              <button
-                type="submit"
-                disabled={submitting}
-                className={`btn ${entryMode === 'income' ? 'btn-emerald' : 'btn-magenta'}`}
-                style={{ height: '40px', width: '100%' }}
-              >
-                <Plus size={16} />
-                {entryMode === 'income' ? 'Sumar' : 'Anotar'}
-              </button>
-            </div>
-          </div>
+          )}
 
           {showNoteField && (
             <div style={{ marginTop: '12px' }}>
-              <label className="field-label">
-                Nota reflexiva Kakeibo (¿Fue planeado, emocional o indispensable?)
-              </label>
+              <label className="field-label">Nota adicional</label>
               <input
                 type="text"
                 className="neon-input"
-                placeholder="Escribe un detalle o reflexión breve para recordar este movimiento..."
+                placeholder="Detalle opcional..."
                 value={note}
                 onChange={(e) => setNote(e.target.value)}
               />
@@ -506,26 +696,27 @@ export const LedgerTab: React.FC<LedgerTabProps> = ({
         </form>
       </div>
 
-      {/* Main Asian Running-Balance Ledger Book */}
+      {/* Main Parallel Running-Balance Ledger Book */}
       <div className="ledger-book">
         <div className="ledger-book-header">
           <div className="ledger-book-title">
             <BookOpen size={19} className="text-cyan" />
             <div>
               <h3>
-                Libreta de Movimientos del Mes{' '}
+                Libreta en Paralelo ({currencyCode}): Efectivo + Transferencia{' '}
                 <span className="asian-chip" style={{ marginLeft: '6px' }}>
                   出納帳 · 입출금장부 · 收支记账
                 </span>
               </h3>
               <div style={{ fontSize: '0.77rem', color: 'var(--text-secondary)', marginTop: '2px' }}>
-                Cada entrada o salida actualiza tu Saldo General en tiempo real renglón por renglón.
+                Control simultáneo renglón por renglón de tus billetes en Efectivo, tu saldo en
+                Transferencia y tu Total General.
               </div>
             </div>
           </div>
 
           <div className="ledger-filters">
-            <div style={{ position: 'relative', minWidth: '190px' }}>
+            <div style={{ position: 'relative', minWidth: '170px' }}>
               <Search
                 size={14}
                 style={{
@@ -539,8 +730,13 @@ export const LedgerTab: React.FC<LedgerTabProps> = ({
               <input
                 type="text"
                 className="neon-input"
-                style={{ paddingLeft: '30px', paddingTop: '6px', paddingBottom: '6px', fontSize: '0.82rem' }}
-                placeholder="Buscar concepto..."
+                style={{
+                  paddingLeft: '30px',
+                  paddingTop: '6px',
+                  paddingBottom: '6px',
+                  fontSize: '0.8rem',
+                }}
+                placeholder="Buscar..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
               />
@@ -548,7 +744,20 @@ export const LedgerTab: React.FC<LedgerTabProps> = ({
 
             <select
               className="neon-select"
-              style={{ width: 'auto', paddingTop: '6px', paddingBottom: '6px', fontSize: '0.82rem' }}
+              style={{ width: 'auto', paddingTop: '6px', paddingBottom: '6px', fontSize: '0.8rem' }}
+              value={filterChannel}
+              onChange={(e) =>
+                setFilterChannel(e.target.value as 'all' | 'efectivo' | 'transferencia')
+              }
+            >
+              <option value="all">Efectivo + Transferencia</option>
+              <option value="efectivo">Solo Efectivo</option>
+              <option value="transferencia">Solo Transferencia</option>
+            </select>
+
+            <select
+              className="neon-select"
+              style={{ width: 'auto', paddingTop: '6px', paddingBottom: '6px', fontSize: '0.8rem' }}
               value={filterDivision}
               onChange={(e) => setFilterDivision(e.target.value)}
             >
@@ -565,7 +774,6 @@ export const LedgerTab: React.FC<LedgerTabProps> = ({
               type="button"
               className="btn btn-sm btn-ghost"
               onClick={() => setOrderAsc((prev) => !prev)}
-              title="Cambiar orden cronológico"
             >
               <ArrowUpDown size={14} />
               {orderAsc ? 'Orden Libreta ↑' : 'Recientes ↓'}
@@ -578,70 +786,81 @@ export const LedgerTab: React.FC<LedgerTabProps> = ({
             <thead>
               <tr>
                 <th>Fecha</th>
-                <th>Concepto y Conciencia</th>
-                <th>Sobre / Destino</th>
-                <th className="num-col">Entrada (+)</th>
-                <th className="num-col">Salida (-)</th>
-                <th className="num-col">Saldo General (残高)</th>
+                <th>Concepto</th>
+                <th>Sobre</th>
+                <th>Vía</th>
+                <th className="num-col">Monto</th>
+                <th className="num-col" style={{ color: 'var(--neon-emerald)' }}>
+                  Saldo Efectivo
+                </th>
+                <th className="num-col" style={{ color: 'var(--neon-violet)' }}>
+                  Saldo Transf.
+                </th>
+                <th className="num-col" style={{ color: 'var(--neon-cyan)' }}>
+                  Total General
+                </th>
                 <th style={{ textAlign: 'right' }}>Acciones</th>
               </tr>
             </thead>
             <tbody>
-              {orderAsc && filterDivision === 'all' && !searchQuery.trim() && (
-                <tr className="ledger-opening-row">
-                  <td className="mono" style={{ color: 'var(--text-secondary)' }}>
-                    01 {formatShortDate(`${month.monthKey}-01`).split(' ')[1]}
-                  </td>
-                  <td>
-                    <strong>Apertura de Mes</strong>{' '}
-                    <span style={{ color: 'var(--text-secondary)', fontSize: '0.8rem' }}>
-                      (Salario: {formatMoney(summary.salary, currencySymbol)}
-                      {summary.carryover !== 0
-                        ? ` · Inicial: ${formatMoney(summary.carryover, currencySymbol, true)}`
-                        : ''}
-                      )
-                    </span>
-                  </td>
-                  <td>
-                    <span className="div-badge div-cyan">Fondo Base</span>
-                  </td>
-                  <td className="num-col text-cyan">
-                    {formatMoney(summary.openingBalance, currencySymbol)}
-                  </td>
-                  <td className="num-col" style={{ color: 'var(--text-muted)' }}>
-                    —
-                  </td>
-                  <td className="num-col text-cyan" style={{ fontWeight: 700 }}>
-                    {formatMoney(summary.openingBalance, currencySymbol)}
-                  </td>
-                  <td style={{ textAlign: 'right' }}>
-                    <button
-                      type="button"
-                      className="btn btn-sm btn-ghost"
-                      onClick={() => onNavigateTab('envelopes')}
-                    >
-                      Editar base
-                    </button>
-                  </td>
-                </tr>
-              )}
+              {orderAsc &&
+                filterDivision === 'all' &&
+                filterChannel === 'all' &&
+                !searchQuery.trim() && (
+                  <tr className="ledger-opening-row">
+                    <td className="mono" style={{ color: 'var(--text-secondary)' }}>
+                      01 {formatShortDate(`${month.monthKey}-01`).split(' ')[1]}
+                    </td>
+                    <td colSpan={2}>
+                      <strong>Apertura de Mes ({currencyCode})</strong>{' '}
+                      <span style={{ color: 'var(--text-secondary)', fontSize: '0.78rem' }}>
+                        (Efec: {formatMoney(summary.openingEfectivo, currencySymbol)} · Transf:{' '}
+                        {formatMoney(summary.openingTransferencia, currencySymbol)})
+                      </span>
+                    </td>
+                    <td>
+                      <span className="div-badge div-cyan">Base</span>
+                    </td>
+                    <td className="num-col text-cyan">
+                      {formatMoney(summary.openingBalance, currencySymbol)}
+                    </td>
+                    <td className="num-col text-emerald" style={{ fontWeight: 700 }}>
+                      {formatMoney(summary.openingEfectivo, currencySymbol)}
+                    </td>
+                    <td className="num-col text-violet" style={{ fontWeight: 700 }}>
+                      {formatMoney(summary.openingTransferencia, currencySymbol)}
+                    </td>
+                    <td className="num-col text-cyan" style={{ fontWeight: 700 }}>
+                      {formatMoney(summary.openingBalance, currencySymbol)}
+                    </td>
+                    <td style={{ textAlign: 'right' }}>
+                      <button
+                        type="button"
+                        className="btn btn-sm btn-ghost"
+                        onClick={() => onNavigateTab('envelopes')}
+                      >
+                        Base
+                      </button>
+                    </td>
+                  </tr>
+                )}
 
               {visibleEntries.length === 0 ? (
                 <tr>
-                  <td colSpan={7}>
+                  <td colSpan={9}>
                     <div className="empty-state">
                       <p style={{ margin: '0 0 6px', fontWeight: 600, color: 'var(--text-primary)' }}>
-                        No hay movimientos anotados con este filtro en la libreta.
+                        Aún no hay movimientos registrados con este filtro en {currencyCode}.
                       </p>
                       <p style={{ margin: 0, fontSize: '0.84rem' }}>
-                        Usa el formulario superior para anotar cada gasto, pago, aporte de inversión
-                        o ingreso adicional.
+                        Registra tus gastos, ingresos o cambios Efectivo ⇄ Transferencia arriba.
                       </p>
                     </div>
                   </td>
                 </tr>
               ) : (
                 visibleEntries.map((row) => {
+                  const isTraspaso = row.type === 'channel_transfer';
                   const isPos = row.signedAmount > 0;
                   const pillarInfo = KAKEIBO_PILLARS[row.pillar] || KAKEIBO_PILLARS.supervivencia;
                   const invLabel =
@@ -651,7 +870,10 @@ export const LedgerTab: React.FC<LedgerTabProps> = ({
 
                   return (
                     <tr key={row.id}>
-                      <td className="mono" style={{ whiteSpace: 'nowrap', color: 'var(--text-secondary)' }}>
+                      <td
+                        className="mono"
+                        style={{ whiteSpace: 'nowrap', color: 'var(--text-secondary)' }}
+                      >
                         {formatShortDate(row.date)}
                       </td>
                       <td>
@@ -663,15 +885,20 @@ export const LedgerTab: React.FC<LedgerTabProps> = ({
                             display: 'flex',
                             alignItems: 'center',
                             gap: '8px',
-                            marginTop: '4px',
+                            marginTop: '3px',
                             flexWrap: 'wrap',
                           }}
                         >
                           <span className="pillar-badge">
                             {pillarInfo.asianTag} · {pillarInfo.label}
                           </span>
+                          {isTraspaso && (row.transferFee || 0) > 0 && (
+                            <span className="pillar-badge" style={{ color: 'var(--neon-magenta)' }}>
+                              Comisión: -{formatMoney(row.transferFee || 0, currencySymbol)}
+                            </span>
+                          )}
                           {row.note && (
-                            <span style={{ fontSize: '0.76rem', color: 'var(--text-secondary)' }}>
+                            <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
                               “{row.note}”
                             </span>
                           )}
@@ -683,11 +910,55 @@ export const LedgerTab: React.FC<LedgerTabProps> = ({
                           {invLabel ? ` → ${invLabel}` : ''}
                         </span>
                       </td>
-                      <td className="num-col text-emerald" style={{ fontWeight: isPos ? 700 : 400 }}>
-                        {isPos ? formatMoney(row.amount, currencySymbol, true) : '—'}
+                      <td>
+                        {isTraspaso ? (
+                          <span className="div-badge div-cyan">
+                            <ArrowLeftRight size={12} />
+                            {row.transferDirection === 'cash_to_transf'
+                              ? 'Efec → Transf'
+                              : 'Transf → Efec'}
+                          </span>
+                        ) : row.paymentMethod === 'transferencia' ? (
+                          <span className="div-badge div-violet">
+                            <Smartphone size={12} /> Transf.
+                          </span>
+                        ) : (
+                          <span className="div-badge div-emerald">
+                            <Banknote size={12} /> Efectivo
+                          </span>
+                        )}
                       </td>
-                      <td className="num-col text-magenta" style={{ fontWeight: !isPos ? 700 : 400 }}>
-                        {!isPos ? `-${formatMoney(row.amount, currencySymbol)}` : '—'}
+                      <td
+                        className={`num-col ${
+                          isTraspaso
+                            ? 'text-cyan'
+                            : isPos
+                            ? 'text-emerald'
+                            : 'text-magenta'
+                        }`}
+                        style={{ fontWeight: 700 }}
+                      >
+                        {isTraspaso
+                          ? `⇄ ${formatMoney(row.amount, currencySymbol)}`
+                          : isPos
+                          ? formatMoney(row.amount, currencySymbol, true)
+                          : `-${formatMoney(row.amount, currencySymbol)}`}
+                      </td>
+                      <td
+                        className={`num-col ${
+                          row.runningEfectivo < 0 ? 'text-magenta' : 'text-emerald'
+                        }`}
+                        style={{ fontWeight: 600 }}
+                      >
+                        {formatMoney(row.runningEfectivo, currencySymbol)}
+                      </td>
+                      <td
+                        className={`num-col ${
+                          row.runningTransferencia < 0 ? 'text-magenta' : 'text-violet'
+                        }`}
+                        style={{ fontWeight: 600 }}
+                      >
+                        {formatMoney(row.runningTransferencia, currencySymbol)}
                       </td>
                       <td
                         className={`num-col ${
@@ -701,7 +972,7 @@ export const LedgerTab: React.FC<LedgerTabProps> = ({
                         <button
                           type="button"
                           className="icon-btn"
-                          title="Editar asiento"
+                          title="Editar movimiento"
                           onClick={() => startEdit(row)}
                         >
                           <Edit3 size={15} />
@@ -709,7 +980,7 @@ export const LedgerTab: React.FC<LedgerTabProps> = ({
                         <button
                           type="button"
                           className="icon-btn danger"
-                          title="Eliminar asiento"
+                          title="Eliminar movimiento"
                           onClick={() => onDeleteEntry(row.id)}
                         >
                           <Trash2 size={15} />
@@ -729,10 +1000,7 @@ export const LedgerTab: React.FC<LedgerTabProps> = ({
         <div className="neon-card">
           <div className="kpi-header">
             <span className="kpi-label">
-              Ritmo Semanal Kakeibo <span className="asian-chip">週間集計</span>
-            </span>
-            <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
-              Control por semanas del mes
+              Ritmo Semanal Kakeibo ({currencyCode}) <span className="asian-chip">週間集計</span>
             </span>
           </div>
 
@@ -743,12 +1011,15 @@ export const LedgerTab: React.FC<LedgerTabProps> = ({
                 <div key={w.weekNumber} className="week-box">
                   <div className="week-box-title">{w.label}</div>
                   <div className="week-box-range">{w.rangeLabel}</div>
-                  <div style={{ fontSize: '0.76rem', color: 'var(--neon-emerald)' }} className="mono">
+                  <div
+                    style={{ fontSize: '0.75rem', color: 'var(--neon-emerald)' }}
+                    className="mono"
+                  >
                     +{formatMoney(w.income, currencySymbol)}
                   </div>
                   <div
                     style={{
-                      fontSize: '0.84rem',
+                      fontSize: '0.82rem',
                       fontWeight: 700,
                       color: w.expense > 0 ? 'var(--neon-magenta)' : 'var(--text-muted)',
                       margin: '2px 0 8px',
@@ -764,40 +1035,6 @@ export const LedgerTab: React.FC<LedgerTabProps> = ({
               );
             })}
           </div>
-
-          <div style={{ marginTop: '18px', paddingTop: '14px', borderTop: '1px solid var(--border-subtle)' }}>
-            <div className="kpi-label" style={{ marginBottom: '10px' }}>
-              Balance por Naturaleza del Gasto (4 Pilares Kakeibo + Patrimonio)
-            </div>
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
-                gap: '10px',
-              }}
-            >
-              {(['supervivencia', 'patrimonio', 'opcional', 'cultura', 'imprevisto'] as KakeiboPillar[]).map(
-                (pk) => (
-                  <div
-                    key={pk}
-                    style={{
-                      padding: '8px 10px',
-                      borderRadius: '8px',
-                      background: 'rgba(8, 12, 23, 0.7)',
-                      border: '1px solid var(--border-subtle)',
-                    }}
-                  >
-                    <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)' }}>
-                      {KAKEIBO_PILLARS[pk].asianTag} · {KAKEIBO_PILLARS[pk].label}
-                    </div>
-                    <div className="mono" style={{ fontWeight: 700, marginTop: '3px', fontSize: '0.92rem' }}>
-                      {formatMoney(summary.pillarTotals[pk] || 0, currencySymbol)}
-                    </div>
-                  </div>
-                )
-              )}
-            </div>
-          </div>
         </div>
 
         <div className="neon-card card-violet">
@@ -807,38 +1044,42 @@ export const LedgerTab: React.FC<LedgerTabProps> = ({
               <span className="asian-chip">振り返り</span>
             </span>
           </div>
-          <p style={{ margin: '0 0 12px', fontSize: '0.82rem', color: 'var(--text-secondary)' }}>
-            En Japón y Corea, toda libreta cierra con tus metas y aprendizajes del mes para tomar
-            mejores decisiones con tu dinero.
-          </p>
 
           <form
             onSubmit={handleSaveReflectionForm}
             style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}
           >
             <div>
-              <label className="field-label">Propósito / Meta financiera de este mes</label>
+              <label className="field-label">Meta de este mes ({currencyCode})</label>
               <input
                 type="text"
                 className="neon-input"
-                placeholder="Ej. Cumplir mis inversiones sin tocar el fondo de hogar..."
+                placeholder="Ej. Cuidar el efectivo disponible y cumplir meta de ahorro..."
                 value={howMuchCanISave}
                 onChange={(e) => setHowMuchCanISave(e.target.value)}
               />
             </div>
 
             <div>
-              <label className="field-label">¿Qué puedo optimizar para el próximo mes?</label>
+              <label className="field-label">¿Qué mejorar el próximo mes?</label>
               <textarea
                 rows={2}
                 className="neon-textarea"
-                placeholder="Ej. Reducir gastos hormiga de fin de semana, adelantar cuota..."
+                placeholder="Notas sobre tus gastos en efectivo o transferencia..."
                 value={improvementPlan}
                 onChange={(e) => setImprovementPlan(e.target.value)}
               />
             </div>
 
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', flexWrap: 'wrap' }}>
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: '10px',
+                flexWrap: 'wrap',
+              }}
+            >
               <select
                 className="neon-select"
                 style={{ width: 'auto', minWidth: '180px' }}
@@ -866,12 +1107,8 @@ export const LedgerTab: React.FC<LedgerTabProps> = ({
         <div className="modal-backdrop" onClick={() => setEditingEntry(null)}>
           <div className="modal-panel" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
-              <h3>Editar Movimiento de la Libreta</h3>
-              <button
-                type="button"
-                className="icon-btn"
-                onClick={() => setEditingEntry(null)}
-              >
+              <h3>Editar Movimiento</h3>
+              <button type="button" className="icon-btn" onClick={() => setEditingEntry(null)}>
                 <X size={18} />
               </button>
             </div>
@@ -888,7 +1125,7 @@ export const LedgerTab: React.FC<LedgerTabProps> = ({
                 />
               </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '10px' }}>
                 <div>
                   <label className="field-label">Monto ({currencySymbol})</label>
                   <input
@@ -901,6 +1138,21 @@ export const LedgerTab: React.FC<LedgerTabProps> = ({
                     onChange={(e) => setEditAmountStr(e.target.value)}
                   />
                 </div>
+
+                {editingEntry.type !== 'channel_transfer' && (
+                  <div>
+                    <label className="field-label">Vía de pago</label>
+                    <select
+                      className="neon-select"
+                      value={editPaymentMethod}
+                      onChange={(e) => setEditPaymentMethod(e.target.value as PaymentMethod)}
+                    >
+                      <option value="efectivo">Efectivo</option>
+                      <option value="transferencia">Transferencia</option>
+                    </select>
+                  </div>
+                )}
+
                 <div>
                   <label className="field-label">Fecha</label>
                   <input

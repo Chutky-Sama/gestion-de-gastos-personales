@@ -1,28 +1,26 @@
 import React, { useState } from 'react';
 import {
   ArrowUpRight,
+  Banknote,
   Check,
   Edit3,
   Plus,
+  Smartphone,
   Trash2,
   TrendingUp,
   X,
 } from 'lucide-react';
-import {
-  MonthComputedSummary,
-  getTodayDateString,
-} from '../../shared/calculations';
+import { MonthComputedSummary } from '../../shared/calculations';
 import {
   InvestmentCategory,
   InvestmentDefinition,
+  PaymentMethod,
 } from '../../shared/types';
-import {
-  INVESTMENT_CATEGORIES,
-  formatMoney,
-} from '../utils/format';
+import { INVESTMENT_CATEGORIES, formatMoney } from '../utils/format';
 
 interface InvestmentsTabProps {
   monthKey: string;
+  currencyCode: string;
   investments: InvestmentDefinition[];
   summary: MonthComputedSummary;
   allTimeTotals: Record<string, number>;
@@ -46,11 +44,15 @@ interface InvestmentsTabProps {
     }
   ) => Promise<void>;
   onDeleteInvestment: (id: string) => Promise<void>;
-  onQuickContribute: (investment: InvestmentDefinition, amount: number) => Promise<void>;
+  onQuickContribute: (
+    investment: InvestmentDefinition,
+    amount: number,
+    paymentMethod: PaymentMethod
+  ) => Promise<void>;
 }
 
 export const InvestmentsTab: React.FC<InvestmentsTabProps> = ({
-  monthKey,
+  currencyCode,
   investments,
   summary,
   allTimeTotals,
@@ -61,21 +63,21 @@ export const InvestmentsTab: React.FC<InvestmentsTabProps> = ({
   onQuickContribute,
 }) => {
   const [name, setName] = useState('');
-  const [category, setCategory] = useState<InvestmentCategory>('acciones_etf');
+  const [category, setCategory] = useState<InvestmentCategory>('negocio');
   const [targetStr, setTargetStr] = useState('');
   const [platform, setPlatform] = useState('');
-  const [notes, setNotes] = useState('');
   const [creating, setCreating] = useState(false);
 
   const [editingInv, setEditingInv] = useState<InvestmentDefinition | null>(null);
   const [editName, setEditName] = useState('');
-  const [editCategory, setEditCategory] = useState<InvestmentCategory>('acciones_etf');
+  const [editCategory, setEditCategory] = useState<InvestmentCategory>('negocio');
   const [editTargetStr, setEditTargetStr] = useState('');
   const [editPlatform, setEditPlatform] = useState('');
   const [editNotes, setEditNotes] = useState('');
 
   const [contribInvId, setContribInvId] = useState<string | null>(null);
   const [contribAmountStr, setContribAmountStr] = useState('');
+  const [contribMethod, setContribMethod] = useState<PaymentMethod>('efectivo');
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -87,12 +89,10 @@ export const InvestmentsTab: React.FC<InvestmentsTabProps> = ({
         category,
         monthlyTarget: Math.max(0, parseFloat(targetStr) || 0),
         platform: platform.trim() || undefined,
-        notes: notes.trim() || undefined,
       });
       setName('');
       setTargetStr('');
       setPlatform('');
-      setNotes('');
     } finally {
       setCreating(false);
     }
@@ -128,7 +128,6 @@ export const InvestmentsTab: React.FC<InvestmentsTabProps> = ({
 
   return (
     <div>
-      {/* Header Summary + Creator */}
       <div className="neon-card card-violet" style={{ marginBottom: '20px' }}>
         <div
           style={{
@@ -141,13 +140,21 @@ export const InvestmentsTab: React.FC<InvestmentsTabProps> = ({
           }}
         >
           <div>
-            <h3 style={{ margin: '0 0 4px', fontSize: '1.15rem', display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <TrendingUp size={20} className="text-violet" /> Cartera Personalizada de Inversiones{' '}
+            <h3
+              style={{
+                margin: '0 0 4px',
+                fontSize: '1.15rem',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+              }}
+            >
+              <TrendingUp size={20} className="text-violet" /> Cartera de Inversiones ({currencyCode}){' '}
               <span className="asian-chip">投資ポートフォリオ</span>
             </h3>
             <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-              Define aquí cuáles son tus inversiones. Se integrarán automáticamente en tu división
-              mensual y en tu libreta de movimientos ({getTodayDateString().slice(0, 7) === monthKey ? 'mes actual' : monthKey}).
+              Define aquí cuáles son tus inversiones en {currencyCode} y registra tus aportes en
+              Efectivo o por Transferencia.
             </p>
           </div>
 
@@ -196,7 +203,7 @@ export const InvestmentsTab: React.FC<InvestmentsTabProps> = ({
               type="text"
               required
               className="neon-input"
-              placeholder="Ej. S&P 500, Bitcoin, Plazo Fijo..."
+              placeholder="Ej. Negocio, Fondo USD, Mercancía..."
               value={name}
               onChange={(e) => setName(e.target.value)}
             />
@@ -218,7 +225,7 @@ export const InvestmentsTab: React.FC<InvestmentsTabProps> = ({
           </div>
 
           <div>
-            <label className="field-label">Monto mensual planeado ({currencySymbol})</label>
+            <label className="field-label">Meta mensual ({currencySymbol})</label>
             <input
               type="number"
               step="0.01"
@@ -231,11 +238,11 @@ export const InvestmentsTab: React.FC<InvestmentsTabProps> = ({
           </div>
 
           <div>
-            <label className="field-label">Plataforma / Entidad (Opcional)</label>
+            <label className="field-label">Plataforma / Lugar (Opcional)</label>
             <input
               type="text"
               className="neon-input"
-              placeholder="Ej. Broker, Banco, Wallet..."
+              placeholder="Ej. Efectivo, Tarjeta, Wallet..."
               value={platform}
               onChange={(e) => setPlatform(e.target.value)}
             />
@@ -254,15 +261,13 @@ export const InvestmentsTab: React.FC<InvestmentsTabProps> = ({
         </form>
       </div>
 
-      {/* Investments Cards */}
       {investments.length === 0 ? (
         <div className="neon-card empty-state">
           <h4 style={{ margin: '0 0 6px', color: 'var(--text-primary)' }}>
-            Todavía no tienes inversiones registradas
+            Todavía no tienes inversiones registradas en {currencyCode}
           </h4>
           <p style={{ margin: 0, fontSize: '0.88rem' }}>
-            Usa el formulario superior para definir cada una de tus inversiones (acciones, ETFs,
-            cripto, negocio, certificados financieros o fondos de ahorro).
+            Usa el formulario superior para definir tus inversiones en {currencyCode}.
           </p>
         </div>
       ) : (
@@ -387,40 +392,64 @@ export const InvestmentsTab: React.FC<InvestmentsTabProps> = ({
                       background: 'rgba(0, 255, 157, 0.07)',
                       border: '1px solid rgba(0, 255, 157, 0.35)',
                       display: 'flex',
+                      flexDirection: 'column',
                       gap: '8px',
-                      alignItems: 'center',
                     }}
                   >
-                    <input
-                      type="number"
-                      step="0.01"
-                      min="0.01"
-                      autoFocus
-                      className="neon-input mono-input"
-                      placeholder="Monto a invertir"
-                      value={contribAmountStr}
-                      onChange={(e) => setContribAmountStr(e.target.value)}
-                    />
-                    <button
-                      type="button"
-                      className="btn btn-sm btn-emerald"
-                      onClick={async () => {
-                        const val = parseFloat(contribAmountStr);
-                        if (!Number.isNaN(val) && val > 0) {
-                          await onQuickContribute(inv, val);
-                          setContribInvId(null);
-                        }
-                      }}
-                    >
-                      <Check size={14} /> Registrar
-                    </button>
-                    <button
-                      type="button"
-                      className="icon-btn"
-                      onClick={() => setContribInvId(null)}
-                    >
-                      <X size={15} />
-                    </button>
+                    <div style={{ display: 'flex', gap: '6px' }}>
+                      <button
+                        type="button"
+                        className={`btn btn-sm ${
+                          contribMethod === 'efectivo' ? 'btn-emerald' : 'btn-ghost'
+                        }`}
+                        style={{ flex: 1 }}
+                        onClick={() => setContribMethod('efectivo')}
+                      >
+                        <Banknote size={13} /> Efectivo
+                      </button>
+                      <button
+                        type="button"
+                        className={`btn btn-sm ${
+                          contribMethod === 'transferencia' ? 'btn-violet' : 'btn-ghost'
+                        }`}
+                        style={{ flex: 1 }}
+                        onClick={() => setContribMethod('transferencia')}
+                      >
+                        <Smartphone size={13} /> Transferencia
+                      </button>
+                    </div>
+                    <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0.01"
+                        autoFocus
+                        className="neon-input mono-input"
+                        placeholder="Monto"
+                        value={contribAmountStr}
+                        onChange={(e) => setContribAmountStr(e.target.value)}
+                      />
+                      <button
+                        type="button"
+                        className="btn btn-sm btn-emerald"
+                        onClick={async () => {
+                          const val = parseFloat(contribAmountStr);
+                          if (!Number.isNaN(val) && val > 0) {
+                            await onQuickContribute(inv, val, contribMethod);
+                            setContribInvId(null);
+                          }
+                        }}
+                      >
+                        <Check size={14} /> OK
+                      </button>
+                      <button
+                        type="button"
+                        className="icon-btn"
+                        onClick={() => setContribInvId(null)}
+                      >
+                        <X size={15} />
+                      </button>
+                    </div>
                   </div>
                 )}
               </div>
@@ -429,7 +458,6 @@ export const InvestmentsTab: React.FC<InvestmentsTabProps> = ({
         </div>
       )}
 
-      {/* Edit Modal */}
       {editingInv && (
         <div className="modal-backdrop" onClick={() => setEditingInv(null)}>
           <div className="modal-panel" onClick={(e) => e.stopPropagation()}>
@@ -485,7 +513,7 @@ export const InvestmentsTab: React.FC<InvestmentsTabProps> = ({
               </div>
 
               <div>
-                <label className="field-label">Plataforma / Entidad</label>
+                <label className="field-label">Plataforma / Lugar</label>
                 <input
                   type="text"
                   className="neon-input"

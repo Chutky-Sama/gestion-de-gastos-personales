@@ -1112,13 +1112,90 @@ textarea {
   z-index: 200;
 }
 
+/* Parallel Efectivo / Transferencia & Multi-Currency Additions */
+.type-switch-btn.active-transfer {
+  background: var(--neon-violet-dim);
+  color: var(--neon-violet);
+  box-shadow: 0 0 14px rgba(185, 78, 255, 0.22);
+}
+
+.currency-switcher {
+  display: inline-flex;
+  align-items: center;
+  background: rgba(8, 12, 23, 0.88);
+  border: 1px solid rgba(0, 240, 255, 0.3);
+  border-radius: var(--radius-sm);
+  padding: 3px;
+  gap: 3px;
+}
+
+.currency-chip-btn {
+  padding: 5px 11px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.16s;
+}
+
+.currency-chip-btn:hover {
+  color: var(--text-primary);
+}
+
+.currency-chip-btn.active {
+  background: var(--neon-cyan-dim);
+  border-color: rgba(0, 240, 255, 0.55);
+  color: var(--neon-cyan);
+  box-shadow: 0 0 12px rgba(0, 240, 255, 0.18);
+}
+
+.channel-mini-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.channel-mini-box {
+  padding: 7px 10px;
+  border-radius: 8px;
+  background: rgba(8, 12, 23, 0.72);
+  border: 1px solid var(--border-subtle);
+  cursor: pointer;
+  transition: border-color 0.16s, background 0.16s;
+}
+
+.channel-mini-box:hover {
+  border-color: rgba(0, 240, 255, 0.4);
+  background: rgba(14, 21, 38, 0.9);
+}
+
+.demo-active-banner {
+  margin-bottom: 18px;
+  padding: 14px 18px;
+  border-radius: var(--radius-md);
+  background: linear-gradient(90deg, rgba(255, 46, 136, 0.15), rgba(185, 78, 255, 0.13));
+  border: 1px solid rgba(255, 46, 136, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+  box-shadow: 0 0 22px rgba(255, 46, 136, 0.14);
+}
+
 /* Responsive Breakpoints */
 @media (max-width: 1140px) {
   .hero-grid {
     grid-template-columns: repeat(2, 1fr);
   }
-  .composer-grid {
-    grid-template-columns: repeat(2, 1fr);
+  .composer-grid,
+  .composer-transfer-grid {
+    grid-template-columns: repeat(2, 1fr) !important;
   }
   .two-col-grid {
     grid-template-columns: 1fr;
@@ -1135,8 +1212,9 @@ textarea {
   .envelopes-grid {
     grid-template-columns: 1fr;
   }
-  .composer-grid {
-    grid-template-columns: 1fr;
+  .composer-grid,
+  .composer-transfer-grid {
+    grid-template-columns: 1fr !important;
   }
   .weeks-grid {
     grid-template-columns: repeat(2, 1fr);

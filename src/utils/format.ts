@@ -1,27 +1,13 @@
+import { CURRENCY_OPTIONS, CurrencyOption, findCurrencyOption } from '../../shared/currencies';
 import {
   AppDatabase,
   InvestmentCategory,
   KakeiboPillar,
+  PaymentMethod,
 } from '../../shared/types';
 
-export interface CurrencyOption {
-  code: string;
-  symbol: string;
-  label: string;
-}
-
-export const CURRENCY_OPTIONS: CurrencyOption[] = [
-  { code: 'USD', symbol: '$', label: 'USD ($) · Dólar' },
-  { code: 'DOP', symbol: 'RD$', label: 'DOP (RD$) · Peso Dominicano' },
-  { code: 'MXN', symbol: 'MX$', label: 'MXN (MX$) · Peso Mexicano' },
-  { code: 'COP', symbol: 'COL$', label: 'COP (COL$) · Peso Colombiano' },
-  { code: 'PEN', symbol: 'S/', label: 'PEN (S/) · Sol Peruano' },
-  { code: 'ARS', symbol: 'AR$', label: 'ARS (AR$) · Peso Argentino' },
-  { code: 'CLP', symbol: 'CLP$', label: 'CLP (CLP$) · Peso Chileno' },
-  { code: 'EUR', symbol: '€', label: 'EUR (€) · Euro' },
-  { code: 'GTQ', symbol: 'Q', label: 'GTQ (Q) · Quetzal' },
-  { code: 'CRC', symbol: '₡', label: 'CRC (₡) · Colón' },
-];
+export { CURRENCY_OPTIONS, findCurrencyOption };
+export type { CurrencyOption };
 
 export function formatMoney(amount: number, symbol = '$', showPlus = false): string {
   const num = Number.isFinite(amount) ? amount : 0;
@@ -57,6 +43,10 @@ export function formatFullDateTime(iso: string): string {
   } catch {
     return iso;
   }
+}
+
+export function getPaymentMethodLabel(method: PaymentMethod): string {
+  return method === 'transferencia' ? 'Transferencia' : 'Efectivo';
 }
 
 export const KAKEIBO_PILLARS: Record<
@@ -103,7 +93,13 @@ export const KAKEIBO_PILLARS: Record<
     label: 'Ajuste / Arqueo',
     asianTag: '調整',
     colorClass: 'pillar-magenta',
-    desc: 'Modificación directa o cuadre del dinero general del mes.',
+    desc: 'Modificación directa o cuadre del saldo en Efectivo o Transferencia.',
+  },
+  traspaso: {
+    label: 'Cambio Efectivo ⇄ Transf.',
+    asianTag: '振替',
+    colorClass: 'pillar-cyan',
+    desc: 'Extracción en Caja Extra / Cajero o paso de dinero entre Efectivo y Transferencia.',
   },
 };
 
@@ -111,12 +107,13 @@ export const INVESTMENT_CATEGORIES: Record<
   InvestmentCategory,
   { label: string; badge: string }
 > = {
+  negocio: { label: 'Negocio Propio / Mercancía / Emprendimiento', badge: 'NEGOCIO' },
+  divisas: { label: 'Ahorro / Compra de Divisas (USD, EUR, MLC)', badge: 'DIVISAS' },
+  ahorro_meta: { label: 'Fondo de Emergencia / Meta Fuerte', badge: 'FONDO' },
+  cripto: { label: 'Criptoactivos (USDT, BTC...)', badge: 'CRIPTO' },
   acciones_etf: { label: 'Acciones / ETFs / Bolsa', badge: 'ETF·BOLSA' },
-  cripto: { label: 'Criptoactivos (BTC, ETH...)', badge: 'CRIPTO' },
-  renta_fija: { label: 'Plazo Fijo / Bonos / Cuenta Remunerada', badge: 'RENTA FIJA' },
-  negocio: { label: 'Negocio Propio / Emprendimiento', badge: 'NEGOCIO' },
-  bienes_raices: { label: 'Bienes Raíces / FIBRAs', badge: 'INMUEBLES' },
-  ahorro_meta: { label: 'Fondo de Emergencia / Meta', badge: 'FONDO' },
+  renta_fija: { label: 'Plazo Fijo / Cuenta Remunerada', badge: 'RENTA FIJA' },
+  bienes_raices: { label: 'Bienes Raíces / Inmuebles', badge: 'INMUEBLES' },
   otro: { label: 'Otra Inversión', badge: 'ACTIVO' },
 };
 
@@ -175,39 +172,55 @@ export function exportDatabaseAsJson(db: AppDatabase): void {
 export function exportAllEntriesAsCsv(db: AppDatabase): void {
   const rows: string[][] = [
     [
+      'Moneda',
       'Mes',
       'Fecha',
       'Tipo',
+      'Via de Pago',
       'Concepto',
       'Division',
       'Inversion',
       'Pilar Kakeibo',
       'Monto',
-      'Moneda',
+      'Comision Traspaso',
       'Nota',
     ],
   ];
 
-  const invMap = new Map(db.investments.map((i) => [i.id, i.name]));
-  const sortedMonths = Object.keys(db.months).sort();
+  const workspaces = Object.values(db.currencyWorkspaces || {});
+  for (const ws of workspaces) {
+    const invMap = new Map(ws.investments.map((i) => [i.id, i.name]));
+    const sortedMonths = Object.keys(ws.months).sort();
 
-  for (const mk of sortedMonths) {
-    const m = db.months[mk];
-    for (const e of m.entries) {
-      const signed =
-        e.type === 'income' || e.type === 'adjustment_up' ? e.amount : -e.amount;
-      rows.push([
-        mk,
-        e.date,
-        e.type,
-        e.concept,
-        getDivisionLabel(e.division, m.allocations.customEnvelopes),
-        e.investmentId ? invMap.get(e.investmentId) || '' : '',
-        KAKEIBO_PILLARS[e.pillar]?.label || e.pillar,
-        signed.toFixed(2),
-        db.profile.currencyCode,
-        e.note || '',
-      ]);
+    for (const mk of sortedMonths) {
+      const m = ws.months[mk];
+      for (const e of m.entries) {
+        const signed =
+          e.type === 'channel_transfer'
+            ? e.amount
+            : e.type === 'income' || e.type === 'adjustment_up'
+            ? e.amount
+            : -e.amount;
+
+        rows.push([
+          ws.currencyCode,
+          mk,
+          e.date,
+          e.type,
+          e.type === 'channel_transfer'
+            ? e.transferDirection === 'cash_to_transf'
+              ? 'Efectivo -> Transferencia'
+              : 'Transferencia -> Efectivo'
+            : getPaymentMethodLabel(e.paymentMethod),
+          e.concept,
+          getDivisionLabel(e.division, m.allocations.customEnvelopes),
+          e.investmentId ? invMap.get(e.investmentId) || '' : '',
+          KAKEIBO_PILLARS[e.pillar]?.label || e.pillar,
+          signed.toFixed(2),
+          e.transferFee ? e.transferFee.toFixed(2) : '0.00',
+          e.note || '',
+        ]);
+      }
     }
   }
 

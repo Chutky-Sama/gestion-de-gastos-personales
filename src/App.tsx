@@ -1,26 +1,37 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  ArrowDownRight,
+  ArrowUpRight,
+  Banknote,
   BookOpen,
   ChevronLeft,
   ChevronRight,
   Coins,
+  HardDrive,
   History,
   Layers,
-  SlidersHorizontal,
+  LogOut,
+  Plus,
+  Settings,
+  ShieldCheck,
+  Smartphone,
   Sparkles,
   TrendingUp,
-  Wallet,
 } from 'lucide-react';
 import {
   computeAllTimeInvestmentTotals,
   computeMonthSummary,
-  daysSinceFirstUse,
   formatMonthLabel,
   getCurrentMonthKey,
   getTodayDateString,
   shiftMonthKey,
 } from '../shared/calculations';
-import { AppDatabase, InvestmentDefinition } from '../shared/types';
+import {
+  canExitDemoReset,
+  canStartDemo,
+  getActiveWorkspace,
+} from '../shared/ledgerCore';
+import { AppDatabase, PaymentMethod } from '../shared/types';
 import { DesktopInfo, api } from './api';
 import { AdjustBalanceModal } from './components/AdjustBalanceModal';
 import { EnvelopesTab } from './components/EnvelopesTab';
@@ -34,206 +45,309 @@ type ActiveTab = 'ledger' | 'envelopes' | 'investments' | 'history';
 
 export const App: React.FC = () => {
   const [db, setDb] = useState<AppDatabase | null>(null);
+  const [desktopInfo, setDesktopInfo] = useState<DesktopInfo>({ isDesktop: false });
+  const [loading, setLoading] = useState(true);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [activeMonthKey, setActiveMonthKey] = useState<string>(getCurrentMonthKey());
   const [activeTab, setActiveTab] = useState<ActiveTab>('ledger');
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [toast, setToast] = useState<string | null>(null);
 
   const [isAdjustOpen, setIsAdjustOpen] = useState(false);
+  const [adjustDefaultChannel, setAdjustDefaultChannel] = useState<PaymentMethod>('efectivo');
   const [isSalaryModalOpen, setIsSalaryModalOpen] = useState(false);
-  const [desktopInfo, setDesktopInfo] = useState<DesktopInfo>({ isDesktop: false });
+  const [confirmTopDemoExit, setConfirmTopDemoExit] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
 
   const showToast = useCallback((msg: string) => {
     setToast(msg);
+    setTimeout(() => {
+      setToast((prev) => (prev === msg ? null : prev));
+    }, 3400);
+  }, []);
+
+  const fetchInitial = useCallback(async () => {
+    try {
+      setLoading(true);
+      const [info, state] = await Promise.all([api.getDesktopInfo(), api.getState()]);
+      setDesktopInfo(info);
+      const currentMk = getCurrentMonthKey();
+      const activeWs = getActiveWorkspace(state);
+      if (!activeWs.months[currentMk]) {
+        const sortedKeys = Object.keys(activeWs.months).sort();
+        const prevKey = sortedKeys.filter((k) => k < currentMk).pop();
+        const ensured = await api.ensureMonth(currentMk, prevKey);
+        setDb(ensured);
+      } else {
+        setDb(state);
+      }
+      setActiveMonthKey(currentMk);
+      setErrorMsg(null);
+    } catch (err: unknown) {
+      setErrorMsg(err instanceof Error ? err.message : 'Error cargando la libreta');
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   useEffect(() => {
-    if (!toast) return;
-    const t = setTimeout(() => setToast(null), 2800);
-    return () => clearTimeout(t);
-  }, [toast]);
+    fetchInitial();
+  }, [fetchInitial]);
 
-  useEffect(() => {
-    Promise.all([api.getDesktopInfo(), api.getState()])
-      .then(([info, data]) => {
-        setDesktopInfo(info);
-        setDb(data);
-        const curr = getCurrentMonthKey();
-        if (data.months[curr]) {
-          setActiveMonthKey(curr);
-        } else {
-          const keys = Object.keys(data.months).sort();
-          if (keys.length > 0) setActiveMonthKey(keys[keys.length - 1]);
-        }
-      })
-      .catch((err) => setError(err.message || 'Error al cargar la libreta'))
-      .finally(() => setLoading(false));
-  }, []);
-
-  const handleChangeMonth = async (targetKey: string) => {
-    setActiveMonthKey(targetKey);
-    if (db && !db.months[targetKey]) {
-      const updated = await api.ensureMonth(targetKey);
+  const handleSelectCurrency = async (currencyCode: string) => {
+    if (!db || db.profile.currencyCode === currencyCode) return;
+    try {
+      let updated = await api.selectCurrency(currencyCode);
+      const ws = getActiveWorkspace(updated);
+      if (!ws.months[activeMonthKey]) {
+        const sortedKeys = Object.keys(ws.months).sort();
+        const prevKey = sortedKeys.filter((k) => k < activeMonthKey).pop();
+        updated = await api.ensureMonth(activeMonthKey, prevKey);
+      }
       setDb(updated);
-      showToast(`Libreta de ${formatMonthLabel(targetKey)} lista`);
+      showToast(`Libreta cambiada a ${currencyCode}`);
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : 'Error cambiando moneda');
     }
   };
 
-  const allTimeInvestmentTotals = useMemo(
-    () => (db ? computeAllTimeInvestmentTotals(db) : {}),
-    [db]
-  );
+  const handleSelectMonth = async (targetMonthKey: string) => {
+    if (!db) return;
+    const ws = getActiveWorkspace(db);
+    if (!ws.months[targetMonthKey]) {
+      const sortedKeys = Object.keys(ws.months).sort();
+      const prevKey = sortedKeys.filter((k) => k < targetMonthKey).pop();
+      const updated = await api.ensureMonth(targetMonthKey, prevKey);
+      setDb(updated);
+    }
+    setActiveMonthKey(targetMonthKey);
+  };
 
-  const currentMonth = useMemo(() => {
+  const activeWorkspace = useMemo(() => {
     if (!db) return null;
-    return db.months[activeMonthKey] || Object.values(db.months)[0] || null;
-  }, [db, activeMonthKey]);
+    return getActiveWorkspace(db);
+  }, [db]);
 
-  const previousExistingMonthKey = useMemo(() => {
-    if (!db || !currentMonth) return undefined;
-    const prevKeys = Object.keys(db.months)
-      .filter((k) => k < currentMonth.monthKey)
-      .sort();
-    return prevKeys.length > 0 ? prevKeys[prevKeys.length - 1] : undefined;
-  }, [db, currentMonth]);
+  const activeMonth = useMemo(() => {
+    if (!activeWorkspace) return null;
+    return (
+      activeWorkspace.months[activeMonthKey] ||
+      Object.values(activeWorkspace.months)[0] ||
+      null
+    );
+  }, [activeWorkspace, activeMonthKey]);
 
-  const monthSummary = useMemo(() => {
-    if (!db || !currentMonth) return null;
-    return computeMonthSummary(currentMonth, db.investments, allTimeInvestmentTotals);
-  }, [db, currentMonth, allTimeInvestmentTotals]);
+  const summary = useMemo(() => {
+    if (!activeWorkspace || !activeMonth) return null;
+    return computeMonthSummary(activeMonth, activeWorkspace.investments);
+  }, [activeWorkspace, activeMonth]);
+
+  const allTimeInvestmentTotals = useMemo(() => {
+    if (!activeWorkspace) return {};
+    return computeAllTimeInvestmentTotals(activeWorkspace.months, activeWorkspace.investments);
+  }, [activeWorkspace]);
+
+  const previousMonthKey = useMemo(() => {
+    if (!activeWorkspace) return undefined;
+    const prev = shiftMonthKey(activeMonthKey, -1);
+    return activeWorkspace.months[prev] ? prev : undefined;
+  }, [activeWorkspace, activeMonthKey]);
 
   if (loading) {
     return (
       <div className="app-shell" style={{ textAlign: 'center', paddingTop: '120px' }}>
-        <div className="hanko-seal" style={{ margin: '0 auto 16px' }}>
-          <span>家</span>
-          <span>計</span>
+        <div className="brand-seal" style={{ margin: '0 auto 16px' }}>
+          家計
         </div>
-        <div className="text-cyan" style={{ fontWeight: 700 }}>
-          Cargando tu Libreta Personal Kakeibo...
-        </div>
+        <h2 style={{ margin: '0 0 8px' }}>Abriendo tu Libreta Kakeibo...</h2>
+        <p style={{ color: 'var(--text-secondary)' }}>
+          Cargando saldos en paralelo (Efectivo y Transferencia) desde el Día 1
+        </p>
       </div>
     );
   }
 
-  if (error || !db || !currentMonth || !monthSummary) {
+  if (errorMsg || !db || !activeWorkspace || !activeMonth || !summary) {
     return (
-      <div className="app-shell">
-        <div className="neon-card card-magenta">
-          <h3>No se pudo conectar con el almacenamiento local</h3>
-          <p>{error || 'Estado no disponible'}</p>
-        </div>
+      <div className="app-shell" style={{ textAlign: 'center', paddingTop: '100px' }}>
+        <h2 className="text-magenta">No se pudo cargar la libreta</h2>
+        <p style={{ color: 'var(--text-secondary)' }}>{errorMsg}</p>
+        <button type="button" className="btn btn-cyan" onClick={fetchInitial}>
+          Reintentar
+        </button>
       </div>
     );
   }
 
-  const sym = db.profile.currencySymbol;
-  const monthLabel = formatMonthLabel(currentMonth.monthKey);
-  const dayNumber = daysSinceFirstUse(db.firstUseDate);
-  const isFreshStart =
-    db.profile.currentSalary === 0 &&
-    currentMonth.salary === 0 &&
-    currentMonth.entries.length === 0;
+  const currencySymbol = activeWorkspace.currencySymbol;
+  const currencyCode = activeWorkspace.currencyCode;
+  const demoAvailable = canStartDemo(db);
+  const exitDemoAvailable = canExitDemoReset(db);
 
-  const committedSpent =
-    monthSummary.envelopes.hogar.spent +
-    monthSummary.envelopes.deudas.spent +
-    (currentMonth.hasManutenciones ? monthSummary.envelopes.manutenciones.spent : 0) +
-    monthSummary.envelopes.inversiones.spent +
-    monthSummary.envelopes.custom.reduce((acc, c) => acc + c.spent, 0);
-
-  const committedPct =
-    monthSummary.committedBudgetTotal > 0
-      ? Math.min(100, Math.round((committedSpent / monthSummary.committedBudgetTotal) * 100))
-      : 0;
-
-  const handleQuickInvestmentContribution = async (
-    inv: InvestmentDefinition,
-    amount: number
-  ) => {
-    const today = getTodayDateString();
-    const entryDate = today.startsWith(currentMonth.monthKey)
-      ? today
-      : `${currentMonth.monthKey}-01`;
-    const updated = await api.addEntry(currentMonth.monthKey, {
-      date: entryDate,
-      type: 'expense',
-      amount,
-      concept: `Aporte de inversión: ${inv.name}`,
-      division: 'inversiones',
-      investmentId: inv.id,
-      pillar: 'patrimonio',
-    });
-    setDb(updated);
-    showToast(`Aporte a ${inv.name} guardado en la libreta`);
-  };
+  const isSetupEmpty =
+    !db.isDemoActive &&
+    activeWorkspace.currentSalary === 0 &&
+    activeMonth.salary === 0 &&
+    activeMonth.entries.length === 0;
 
   return (
     <div className="app-shell">
       {/* Top Bar */}
       <header className="topbar">
         <div className="brand-cluster">
-          <div className="hanko-seal" title="Kakeibo · Libro de Cuentas del Hogar">
-            <span>家</span>
-            <span>計</span>
-          </div>
-          <div className="brand-titles">
+          <div className="brand-seal">家計</div>
+          <div className="brand-title">
             <h1>
-              <span>{db.profile.ledgerName}</span>
-              <span className="neon-title-accent">// NEON</span>
+              {db.profile.ledgerName}
+              <span className="brand-badge">Efectivo · Transferencia</span>
             </h1>
-            <p className="brand-subtitle">
-              家計簿 Kakeibo · 가계부 Gagyebu · 记账本 Ji Zhang Ben · Gestión Mensual
+            <p>
+              <span className="pulse-dot" />
+              {desktopInfo.isDesktop ? (
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+                  <HardDrive size={12} className="text-cyan" /> Escritorio Windows · Guardado
+                  Continuo Día 1
+                </span>
+              ) : (
+                <>Guardado continuo desde el Día 1 · CUP / USD en paralelo</>
+              )}
             </p>
           </div>
         </div>
 
         <div className="topbar-controls">
-          <div className="day1-pill" title="Registro persistente guardado desde el primer día de uso">
-            <span className="pulse-dot" />
-            <span>Día #{dayNumber} de registro · Auto-guardado activo</span>
+          {/* Multi-Currency Parallel Switcher (CUP / USD / MLC...) */}
+          <div className="currency-switcher" title="Cambiar de libreta de moneda">
+            {(db.profile.enabledCurrencies || ['CUP', 'USD']).map((code) => (
+              <button
+                key={code}
+                type="button"
+                className={`currency-chip-btn ${currencyCode === code ? 'active' : ''}`}
+                onClick={() => handleSelectCurrency(code)}
+              >
+                {code}
+              </button>
+            ))}
+            <button
+              type="button"
+              className="icon-btn"
+              style={{ width: '28px', height: '28px' }}
+              title="Habilitar o configurar monedas (CUP, USD, MLC, EUR...)"
+              onClick={() => setIsSalaryModalOpen(true)}
+            >
+              <Plus size={14} />
+            </button>
           </div>
 
           <div className="month-switcher">
             <button
               type="button"
-              className="month-nav-btn"
+              className="icon-btn"
               title="Mes anterior"
-              onClick={() => handleChangeMonth(shiftMonthKey(currentMonth.monthKey, -1))}
+              onClick={() => handleSelectMonth(shiftMonthKey(activeMonthKey, -1))}
             >
               <ChevronLeft size={18} />
             </button>
-            <div className="month-current-display">{monthLabel}</div>
+            <div className="month-switcher-label">{formatMonthLabel(activeMonthKey)}</div>
             <button
               type="button"
-              className="month-nav-btn"
+              className="icon-btn"
               title="Mes siguiente"
-              onClick={() => handleChangeMonth(shiftMonthKey(currentMonth.monthKey, 1))}
+              onClick={() => handleSelectMonth(shiftMonthKey(activeMonthKey, 1))}
             >
               <ChevronRight size={18} />
             </button>
           </div>
 
+          {activeMonthKey !== getCurrentMonthKey() && (
+            <button
+              type="button"
+              className="btn btn-sm btn-ghost"
+              onClick={() => handleSelectMonth(getCurrentMonthKey())}
+            >
+              Hoy
+            </button>
+          )}
+
           <button
             type="button"
-            className="btn btn-cyan"
+            className="btn btn-sm btn-ghost"
             onClick={() => setIsSalaryModalOpen(true)}
           >
-            <Wallet size={16} />
-            Salario: <span className="mono">{formatMoney(db.profile.currentSalary, sym)}</span>
+            <Settings size={15} />
+            Salario ({currencyCode})
           </button>
         </div>
       </header>
 
-      {/* First-Time Welcome Banner when starting empty */}
-      {isFreshStart && (
-        <section className="setup-banner">
+      {/* Active One-Time Demo Banner (with Single-Use Reset to Real Mode) */}
+      {exitDemoAvailable && (
+        <div className="demo-active-banner">
+          <div>
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                fontWeight: 700,
+                color: 'var(--neon-magenta)',
+                marginBottom: '3px',
+              }}
+            >
+              <Sparkles size={16} /> MODO DEMO DE UN SOLO USO ACTIVO (CUP y USD de prueba)
+            </div>
+            <div style={{ fontSize: '0.84rem', color: 'var(--text-secondary)' }}>
+              Explora libremente Efectivo, Transferencia y cambios de moneda. Cuando termines, usa
+              el botón de al lado para limpiar la Demo e iniciar tu libreta real{' '}
+              <strong>
+                (luego el reinicio desaparecerá para siempre y tus datos reales no podrán borrarse
+                por error)
+              </strong>
+              .
+            </div>
+          </div>
+
+          {!confirmTopDemoExit ? (
+            <button
+              type="button"
+              className="btn btn-magenta btn-sm"
+              onClick={() => setConfirmTopDemoExit(true)}
+            >
+              <LogOut size={15} /> Salir de Demo e Iniciar Mi Libreta Real (1 solo uso)
+            </button>
+          ) : (
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+              <button
+                type="button"
+                className="btn btn-emerald btn-sm"
+                onClick={async () => {
+                  const next = await api.resetDatabase();
+                  setDb(next);
+                  setConfirmTopDemoExit(false);
+                  showToast('Demo finalizada. Tu libreta real está limpia y protegida contra borrado.');
+                }}
+              >
+                <ShieldCheck size={15} /> Confirmar: Limpiar Demo y Proteger Modo Real
+              </button>
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={() => setConfirmTopDemoExit(false)}
+              >
+                Cancelar
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* First-Time / Currency Setup Banner */}
+      {isSetupEmpty && (
+        <div className="setup-banner">
           <div className="setup-banner-text">
-            <h2>¡Tu libreta personal ya está guardando desde hoy (Día #1)!</h2>
+            <h2>Configura tu libreta en {currencyCode} (Efectivo y Transferencia)</h2>
             <p>
-              Define cuánto es tu salario actual y divídelo entre Hogar, Deudas, Manutenciones,
-              Inversiones y Dinero de Bolsillo, o prueba un ejemplo interactivo en 1 clic.
+              Ingresa tu salario actual en <strong>Efectivo</strong> y/o{' '}
+              <strong>Transferencia</strong> para {currencyCode}, divide tus sobres del mes
+              {demoAvailable ? ' o prueba por única vez la Demo interactiva.' : '.'}
             </p>
           </div>
           <div className="setup-banner-actions">
@@ -242,228 +356,258 @@ export const App: React.FC = () => {
               className="btn btn-cyan"
               onClick={() => setIsSalaryModalOpen(true)}
             >
-              <Wallet size={16} /> 1. Definir Mi Salario Actual
+              1. Configurar Salario ({currencyCode})
             </button>
             <button
               type="button"
               className="btn btn-emerald"
               onClick={() => setActiveTab('envelopes')}
             >
-              <Layers size={16} /> 2. Dividir Mi Dinero
+              2. Dividir Mes en Sobres
             </button>
-            <button
-              type="button"
-              className="btn btn-violet"
-              onClick={async () => {
-                const updated = await api.loadDemo();
-                setDb(updated);
-                showToast('Ejemplo demostrativo cargado (puedes limpiarlo cuando quieras)');
-              }}
-            >
-              <Sparkles size={16} /> Cargar Ejemplo Demo
-            </button>
+            {demoAvailable && (
+              <button
+                type="button"
+                className="btn btn-violet"
+                onClick={async () => {
+                  const next = await api.loadDemo();
+                  setDb(next);
+                  setActiveMonthKey(getCurrentMonthKey());
+                  showToast('Demo de 1 solo uso cargada (incluye ejemplos en CUP y USD)');
+                }}
+              >
+                <Sparkles size={15} /> Probar Demo (1 solo uso)
+              </button>
+            )}
           </div>
-        </section>
+        </div>
       )}
 
-      {/* 4-Card Neon Hero Strip */}
+      {/* Hero 4 Financial KPIs */}
       <section className="hero-grid">
-        {/* 1. General Money of the Month */}
+        {/* 1. General Money with Parallel Efectivo & Transferencia */}
         <div
           className={`neon-card ${
-            monthSummary.currentGeneralBalance < 0 ? 'card-magenta' : 'card-cyan'
+            summary.currentGeneralBalance < 0 ? 'card-magenta' : 'card-cyan'
           }`}
         >
           <div className="kpi-header">
             <span className="kpi-label">
-              Dinero General del Mes <span className="asian-chip">残高 · 잔액</span>
+              Dinero General ({currencyCode}) <span className="asian-chip">総残高</span>
             </span>
+            <button
+              type="button"
+              className="btn btn-sm btn-ghost"
+              style={{ padding: '4px 9px', fontSize: '0.73rem' }}
+              onClick={() => {
+                setAdjustDefaultChannel('efectivo');
+                setIsAdjustOpen(true);
+              }}
+            >
+              <ArrowUpRight size={13} className="text-emerald" />
+              <ArrowDownRight size={13} className="text-magenta" />
+              Modificar
+            </button>
           </div>
 
           <div
             className={`kpi-value ${
-              monthSummary.currentGeneralBalance < 0 ? 'text-magenta' : 'text-cyan'
+              summary.currentGeneralBalance < 0 ? 'text-magenta' : 'text-cyan'
             }`}
+            style={{ marginBottom: '6px' }}
           >
-            {formatMoney(monthSummary.currentGeneralBalance, sym)}
+            {formatMoney(summary.currentGeneralBalance, currencySymbol)}
           </div>
 
-          <div className="kpi-subrow">
-            <span>
-              Entradas:{' '}
-              <strong className="mono text-emerald">
-                {formatMoney(monthSummary.totalInflowAll, sym)}
-              </strong>
-            </span>
-            <span>
-              Salidas:{' '}
-              <strong className="mono text-magenta">
-                -{formatMoney(monthSummary.totalOutflowAll, sym)}
-              </strong>
-            </span>
-          </div>
-
-          <div className="kpi-actions">
-            <button
-              type="button"
-              className="btn btn-sm btn-cyan"
-              onClick={() => setIsAdjustOpen(true)}
+          {/* Parallel Efectivo & Transferencia Boxes */}
+          <div className="channel-mini-grid">
+            <div
+              className="channel-mini-box"
+              title="Clic para subir, bajar o cuadrar tu Efectivo"
+              onClick={() => {
+                setAdjustDefaultChannel('efectivo');
+                setIsAdjustOpen(true);
+              }}
             >
-              <SlidersHorizontal size={14} /> Subir / Bajar Dinero General
-            </button>
+              <div
+                style={{
+                  fontSize: '0.7rem',
+                  color: 'var(--neon-emerald)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  fontWeight: 700,
+                }}
+              >
+                <Banknote size={13} /> EFECTIVO
+              </div>
+              <div
+                className={`mono ${
+                  summary.currentEfectivoBalance < 0 ? 'text-magenta' : 'text-emerald'
+                }`}
+                style={{ fontWeight: 700, fontSize: '0.95rem', marginTop: '2px' }}
+              >
+                {formatMoney(summary.currentEfectivoBalance, currencySymbol)}
+              </div>
+            </div>
+
+            <div
+              className="channel-mini-box"
+              title="Clic para subir, bajar o cuadrar tu saldo en Transferencia"
+              onClick={() => {
+                setAdjustDefaultChannel('transferencia');
+                setIsAdjustOpen(true);
+              }}
+            >
+              <div
+                style={{
+                  fontSize: '0.7rem',
+                  color: 'var(--neon-violet)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  fontWeight: 700,
+                }}
+              >
+                <Smartphone size={13} /> TRANSFERENCIA
+              </div>
+              <div
+                className={`mono ${
+                  summary.currentTransferenciaBalance < 0 ? 'text-magenta' : 'text-violet'
+                }`}
+                style={{ fontWeight: 700, fontSize: '0.95rem', marginTop: '2px' }}
+              >
+                {formatMoney(summary.currentTransferenciaBalance, currencySymbol)}
+              </div>
+            </div>
           </div>
         </div>
 
-        {/* 2. Monthly Salary & Inflows */}
+        {/* 2. Salary & Month Pool */}
         <div className="neon-card">
           <div className="kpi-header">
             <span className="kpi-label">
-              Salario Asignado al Mes <span className="asian-chip">月収</span>
+              Salario y Base ({currencyCode}) <span className="asian-chip">月収</span>
             </span>
             <button
               type="button"
-              className="btn btn-sm btn-ghost"
+              className="icon-btn"
+              title="Editar salario en Efectivo / Transferencia"
               onClick={() => setIsSalaryModalOpen(true)}
             >
-              Cambiar
+              <Settings size={14} />
             </button>
           </div>
-
-          <div className="kpi-value">{formatMoney(monthSummary.salary, sym)}</div>
-
-          <div className="kpi-subrow">
+          <div className="kpi-value">{formatMoney(summary.salary, currencySymbol)}</div>
+          <div className="kpi-sub">
             <span>
-              Extras (+):{' '}
-              <strong className="mono text-emerald">
-                {formatMoney(
-                  monthSummary.totalExtraIncome + monthSummary.totalAdjustmentsUp,
-                  sym,
-                  true
-                )}
+              Efec: <strong className="mono text-emerald">{formatMoney(summary.salaryEfectivo, currencySymbol)}</strong>
+            </span>
+            <span>
+              Transf:{' '}
+              <strong className="mono text-violet">
+                {formatMoney(summary.salaryTransferencia, currencySymbol)}
               </strong>
             </span>
-            {monthSummary.carryover !== 0 && (
-              <span>
-                Inicial:{' '}
-                <strong className="mono">
-                  {formatMoney(monthSummary.carryover, sym, true)}
-                </strong>
-              </span>
-            )}
+          </div>
+          <div className="kpi-sub" style={{ marginTop: '4px' }}>
+            <span>
+              Capital total mes:{' '}
+              <strong className="mono text-cyan">
+                {formatMoney(summary.grossAvailableForMonth, currencySymbol)}
+              </strong>
+            </span>
           </div>
         </div>
 
-        {/* 3. Committed Divisions */}
+        {/* 3. Committed Envelopes */}
         <div className="neon-card card-violet">
           <div className="kpi-header">
             <span className="kpi-label">
-              Dividido en Compromisos <span className="asian-chip">予算</span>
+              Divisiones y Metas <span className="asian-chip">予算配分</span>
             </span>
-            <button
-              type="button"
-              className="btn btn-sm btn-ghost"
-              onClick={() => setActiveTab('envelopes')}
-            >
-              Dividir
-            </button>
           </div>
-
           <div className="kpi-value text-violet">
-            {formatMoney(monthSummary.committedBudgetTotal, sym)}
+            {formatMoney(summary.committedBudgetTotal, currencySymbol)}
           </div>
-
-          <div className="progress-track" style={{ marginBottom: '8px' }}>
-            <div className="progress-fill fill-violet" style={{ width: `${committedPct}%` }} />
-          </div>
-
-          <div className="kpi-subrow">
+          <div className="kpi-sub">
             <span>
-              Ejecutado: <strong className="mono">{formatMoney(committedSpent, sym)}</strong>
+              Ejecutado:{' '}
+              <strong className="mono">{formatMoney(summary.totalOutflowAll, currencySymbol)}</strong>
             </span>
-            <span>{committedPct}% cubierto</span>
+            <span>
+              Inv:{' '}
+              <strong className="mono text-violet">
+                {formatMoney(summary.envelopes.inversiones.planned, currencySymbol)}
+              </strong>
+            </span>
           </div>
         </div>
 
-        {/* 4. Pocket Money (if left over) */}
+        {/* 4. Pocket Money */}
         <div
           className={`neon-card ${
-            monthSummary.pocketStatus === 'deficit'
+            summary.budgetDeficit > 0
               ? 'card-magenta'
-              : monthSummary.pocketStatus === 'surplus'
+              : summary.pocketMoneyRemaining > 0
               ? 'card-emerald'
               : ''
           }`}
         >
           <div className="kpi-header">
             <span className="kpi-label">
-              <Coins size={14} /> Dinero de Bolsillo <span className="asian-chip">小遣 · 용돈</span>
-            </span>
-            <span
-              className={`div-badge ${
-                monthSummary.pocketStatus === 'deficit'
-                  ? 'div-magenta'
-                  : monthSummary.pocketStatus === 'surplus'
-                  ? 'div-emerald'
-                  : 'div-cyan'
-              }`}
-            >
-              {monthSummary.pocketStatus === 'deficit'
-                ? 'Déficit'
-                : monthSummary.pocketStatus === 'surplus'
-                ? 'Sí queda'
-                : 'Exacto'}
+              <Coins size={14} className="text-emerald" /> Dinero de Bolsillo{' '}
+              <span className="asian-chip">용돈</span>
             </span>
           </div>
-
           <div
             className={`kpi-value ${
-              monthSummary.pocketStatus === 'deficit'
+              summary.budgetDeficit > 0
                 ? 'text-magenta'
-                : monthSummary.pocketMoneyRemaining < 0
-                ? 'text-magenta'
-                : 'text-emerald'
+                : summary.pocketMoneyRemaining > 0
+                ? 'text-emerald'
+                : ''
             }`}
           >
-            {monthSummary.pocketStatus === 'deficit'
-              ? `-${formatMoney(monthSummary.budgetDeficit, sym)}`
-              : formatMoney(monthSummary.pocketMoneyRemaining, sym)}
+            {summary.budgetDeficit > 0
+              ? `-${formatMoney(summary.budgetDeficit, currencySymbol)}`
+              : formatMoney(summary.pocketMoneyRemaining, currencySymbol)}
           </div>
-
-          <div className="kpi-subrow">
-            {monthSummary.pocketStatus === 'deficit' ? (
-              <span className="text-magenta">
-                Tus divisiones superan tu dinero del mes
-              </span>
-            ) : (
+          <div className="kpi-sub">
+            {summary.budgetDeficit > 0 ? (
+              <span className="text-magenta">Exceso sobre el capital del mes</span>
+            ) : summary.pocketMoneyPlanned > 0 ? (
               <>
                 <span>
-                  Bolsillo mes:{' '}
+                  Libre inicial:{' '}
                   <strong className="mono">
-                    {formatMoney(monthSummary.pocketMoneyPlanned, sym)}
+                    {formatMoney(summary.pocketMoneyPlanned, currencySymbol)}
                   </strong>
                 </span>
                 <span>
                   Usado:{' '}
                   <strong className="mono">
-                    {formatMoney(monthSummary.pocketMoneySpent, sym)}
+                    {formatMoney(summary.pocketMoneySpent, currencySymbol)}
                   </strong>
                 </span>
               </>
+            ) : (
+              <span>Sin remanente de bolsillo por ahora</span>
             )}
           </div>
         </div>
       </section>
 
       {/* Navigation Tabs */}
-      <nav className="nav-tabs" aria-label="Secciones principales">
+      <nav className="nav-tabs" aria-label="Secciones de la libreta">
         <button
           type="button"
           className={`nav-tab ${activeTab === 'ledger' ? 'active' : ''}`}
           onClick={() => setActiveTab('ledger')}
         >
           <BookOpen size={17} />
-          <span>Libreta del Mes</span>
-          <span className="tab-badge">{currentMonth.entries.length}</span>
+          Libro Diario ({currencyCode})
+          <span className="tab-badge">{activeMonth.entries.length}</span>
         </button>
 
         <button
@@ -472,7 +616,7 @@ export const App: React.FC = () => {
           onClick={() => setActiveTab('envelopes')}
         >
           <Layers size={17} />
-          <span>División del Salario</span>
+          División en Sobres
         </button>
 
         <button
@@ -481,8 +625,10 @@ export const App: React.FC = () => {
           onClick={() => setActiveTab('investments')}
         >
           <TrendingUp size={17} />
-          <span>Mis Inversiones</span>
-          <span className="tab-badge">{db.investments.filter((i) => i.active).length}</span>
+          Mis Inversiones
+          <span className="tab-badge">
+            {activeWorkspace.investments.filter((i) => i.active).length}
+          </span>
         </button>
 
         <button
@@ -491,60 +637,70 @@ export const App: React.FC = () => {
           onClick={() => setActiveTab('history')}
         >
           <History size={17} />
-          <span>Registro Día 1</span>
-          <span className="tab-badge">Día #{dayNumber}</span>
+          Historial Día 1 y Respaldo
         </button>
       </nav>
 
-      {/* Active View */}
+      {/* Active Section */}
       <main>
         {activeTab === 'ledger' && (
           <LedgerTab
-            month={currentMonth}
-            summary={monthSummary}
-            investments={db.investments}
-            currencySymbol={sym}
+            month={activeMonth}
+            summary={summary}
+            investments={activeWorkspace.investments}
+            currencySymbol={currencySymbol}
+            currencyCode={currencyCode}
             onAddEntry={async (payload) => {
-              const updated = await api.addEntry(currentMonth.monthKey, payload);
-              setDb(updated);
-              showToast('Movimiento asentado en tu libreta');
+              const next = await api.addEntry(activeMonth.monthKey, payload);
+              setDb(next);
+              showToast('Movimiento registrado en la libreta');
             }}
             onUpdateEntry={async (entryId, payload) => {
-              const updated = await api.updateEntry(currentMonth.monthKey, entryId, payload);
-              setDb(updated);
+              const next = await api.updateEntry(activeMonth.monthKey, entryId, payload);
+              setDb(next);
               showToast('Movimiento actualizado');
             }}
             onDeleteEntry={async (entryId) => {
-              const updated = await api.deleteEntry(currentMonth.monthKey, entryId);
-              setDb(updated);
-              showToast('Movimiento eliminado de la libreta');
+              const next = await api.deleteEntry(activeMonth.monthKey, entryId);
+              setDb(next);
+              showToast('Movimiento eliminado');
             }}
             onSaveReflection={async (reflection) => {
-              const updated = await api.updateMonthPlan(currentMonth.monthKey, { reflection });
-              setDb(updated);
-              showToast('Reflexión Kakeibo guardada');
+              const next = await api.updateMonthPlan(activeMonth.monthKey, { reflection });
+              setDb(next);
+              showToast('Reflexión mensual guardada');
             }}
-            onOpenAdjustModal={() => setIsAdjustOpen(true)}
+            onOpenAdjustModal={() => {
+              setAdjustDefaultChannel('efectivo');
+              setIsAdjustOpen(true);
+            }}
             onNavigateTab={(t) => setActiveTab(t)}
           />
         )}
 
         {activeTab === 'envelopes' && (
           <EnvelopesTab
-            month={currentMonth}
-            previousMonthKey={previousExistingMonthKey}
-            summary={monthSummary}
-            investments={db.investments}
-            currencySymbol={sym}
+            month={activeMonth}
+            previousMonthKey={previousMonthKey}
+            summary={summary}
+            investments={activeWorkspace.investments}
+            currencySymbol={currencySymbol}
+            currencyCode={currencyCode}
             onSavePlan={async (payload) => {
-              const updated = await api.updateMonthPlan(currentMonth.monthKey, payload);
-              setDb(updated);
-              showToast('División mensual y sobres guardados');
+              const next = await api.updateMonthPlan(activeMonth.monthKey, payload);
+              setDb(next);
+              showToast(`División de sobres (${currencyCode}) guardada`);
             }}
-            onBringCarryover={async (prevKey) => {
-              const updated = await api.ensureMonth(currentMonth.monthKey, prevKey);
-              setDb(updated);
-              showToast(`Saldo arrastrado desde ${formatMonthLabel(prevKey)}`);
+            onBringCarryover={async (prevMk) => {
+              const prevMonth = activeWorkspace.months[prevMk];
+              if (!prevMonth) return;
+              const prevSum = computeMonthSummary(prevMonth, activeWorkspace.investments);
+              const next = await api.updateMonthPlan(activeMonth.monthKey, {
+                carryoverEfectivo: prevSum.currentEfectivoBalance,
+                carryoverTransferencia: prevSum.currentTransferenciaBalance,
+              });
+              setDb(next);
+              showToast(`Saldos Efectivo y Transferencia traídos desde ${formatMonthLabel(prevMk)}`);
             }}
             onNavigateInvestments={() => setActiveTab('investments')}
           />
@@ -552,71 +708,95 @@ export const App: React.FC = () => {
 
         {activeTab === 'investments' && (
           <InvestmentsTab
-            monthKey={currentMonth.monthKey}
-            investments={db.investments}
-            summary={monthSummary}
+            monthKey={activeMonth.monthKey}
+            currencyCode={currencyCode}
+            investments={activeWorkspace.investments}
+            summary={summary}
             allTimeTotals={allTimeInvestmentTotals}
-            currencySymbol={sym}
+            currencySymbol={currencySymbol}
             onCreateInvestment={async (payload) => {
-              const updated = await api.createInvestment({
+              const next = await api.createInvestment({
                 ...payload,
-                monthKey: currentMonth.monthKey,
+                monthKey: activeMonth.monthKey,
               });
-              setDb(updated);
-              showToast(`Inversión "${payload.name}" agregada`);
+              setDb(next);
+              showToast('Inversión agregada a tu cartera');
             }}
             onUpdateInvestment={async (id, payload) => {
-              const updated = await api.updateInvestment(id, {
+              const next = await api.updateInvestment(id, {
                 ...payload,
-                monthKey: currentMonth.monthKey,
+                monthKey: activeMonth.monthKey,
               });
-              setDb(updated);
+              setDb(next);
               showToast('Inversión actualizada');
             }}
             onDeleteInvestment={async (id) => {
-              const updated = await api.deleteInvestment(id);
-              setDb(updated);
-              showToast('Inversión retirada');
+              const next = await api.deleteInvestment(id);
+              setDb(next);
+              showToast('Inversión removida / archivada');
             }}
-            onQuickContribute={handleQuickInvestmentContribution}
+            onQuickContribute={async (inv, amount, paymentMethod) => {
+              const dateForContribution = getTodayDateString().startsWith(activeMonth.monthKey)
+                ? getTodayDateString()
+                : `${activeMonth.monthKey}-01`;
+              const next = await api.addEntry(activeMonth.monthKey, {
+                date: dateForContribution,
+                type: 'expense',
+                amount,
+                paymentMethod,
+                concept: `Aporte a inversión: ${inv.name}`,
+                division: 'inversiones',
+                investmentId: inv.id,
+                pillar: 'patrimonio',
+              });
+              setDb(next);
+              showToast(
+                `Aporte registrado en ${inv.name} (${
+                  paymentMethod === 'transferencia' ? 'Transferencia' : 'Efectivo'
+                })`
+              );
+            }}
           />
         )}
 
         {activeTab === 'history' && (
           <HistoryTab
             db={db}
-            activeMonthKey={currentMonth.monthKey}
-            desktopStoragePath={desktopInfo.storagePath}
-            onOpenDataFolder={
-              desktopInfo.isDesktop
-                ? async () => {
-                    await api.openDataFolder();
-                    showToast('Abriendo carpeta en el Explorador de Windows...');
-                  }
-                : undefined
-            }
+            activeWorkspace={activeWorkspace}
+            desktopInfo={desktopInfo}
             onSelectMonth={(mk) => {
-              handleChangeMonth(mk);
+              handleSelectMonth(mk);
               setActiveTab('ledger');
             }}
             onLoadDemo={async () => {
-              const updated = await api.loadDemo();
-              setDb(updated);
-              setActiveMonthKey(getCurrentMonthKey());
-              setActiveTab('ledger');
-              showToast('Ejemplo demostrativo cargado');
+              try {
+                const next = await api.loadDemo();
+                setDb(next);
+                setActiveMonthKey(getCurrentMonthKey());
+                setActiveTab('ledger');
+                showToast('Demo de 1 solo uso cargada');
+              } catch (err: unknown) {
+                alert(err instanceof Error ? err.message : 'La Demo ya fue utilizada.');
+              }
             }}
-            onResetClean={async () => {
-              const updated = await api.resetDatabase();
-              setDb(updated);
-              setActiveMonthKey(getCurrentMonthKey());
-              setActiveTab('ledger');
-              showToast('Libreta reiniciada en blanco');
+            onExitDemoReset={async () => {
+              try {
+                const next = await api.resetDatabase();
+                setDb(next);
+                setActiveMonthKey(getCurrentMonthKey());
+                setActiveTab('ledger');
+                showToast('Demo limpiada. Tu libreta real está lista y protegida contra borrado.');
+              } catch (err: unknown) {
+                alert(err instanceof Error ? err.message : 'El reinicio no está disponible.');
+              }
             }}
             onImportBackup={async (backup) => {
-              const updated = await api.importBackup(backup);
-              setDb(updated);
+              const next = await api.importBackup(backup);
+              setDb(next);
               showToast('Respaldo restaurado correctamente');
+            }}
+            onOpenDesktopFolder={async () => {
+              await api.openDataFolder();
             }}
           />
         )}
@@ -626,43 +806,48 @@ export const App: React.FC = () => {
       <AdjustBalanceModal
         isOpen={isAdjustOpen}
         onClose={() => setIsAdjustOpen(false)}
-        currentBalance={monthSummary.currentGeneralBalance}
-        currencySymbol={sym}
-        monthLabel={monthLabel}
+        currentEfectivo={summary.currentEfectivoBalance}
+        currentTransferencia={summary.currentTransferenciaBalance}
+        defaultChannel={adjustDefaultChannel}
+        currencySymbol={currencySymbol}
+        currencyCode={currencyCode}
+        monthLabel={formatMonthLabel(activeMonth.monthKey)}
         onConfirm={async (payload) => {
-          const updated = await api.adjustGeneralBalance(currentMonth.monthKey, payload);
-          setDb(updated);
-          showToast('Dinero general del mes actualizado en la libreta');
+          const next = await api.adjustGeneralBalance(activeMonth.monthKey, payload);
+          setDb(next);
+          showToast(
+            `Saldo en ${
+              payload.paymentMethod === 'transferencia' ? 'Transferencia' : 'Efectivo'
+            } actualizado`
+          );
         }}
       />
 
       <SalaryQuickModal
         isOpen={isSalaryModalOpen}
         onClose={() => setIsSalaryModalOpen(false)}
-        profile={db.profile}
-        monthLabel={monthLabel}
+        db={db}
+        monthLabel={formatMonthLabel(activeMonth.monthKey)}
         onSave={async (payload) => {
-          const updated = await api.updateProfile({
+          let next = await api.updateProfile({
             ledgerName: payload.ledgerName,
             currencyCode: payload.currencyCode,
-            currencySymbol: payload.currencySymbol,
-            currentSalary: payload.currentSalary,
+            enabledCurrencies: payload.enabledCurrencies,
+            currentSalaryEfectivo: payload.currentSalaryEfectivo,
+            currentSalaryTransferencia: payload.currentSalaryTransferencia,
             hasManutencionesDefault: payload.hasManutencionesDefault,
-            syncMonthKey: payload.applyToCurrentMonth ? currentMonth.monthKey : undefined,
+            syncMonthKey: payload.applyToCurrentMonth ? activeMonth.monthKey : undefined,
           });
-          if (payload.applyToCurrentMonth) {
-            const withManut = await api.updateMonthPlan(currentMonth.monthKey, {
-              hasManutenciones: payload.hasManutencionesDefault,
-            });
-            setDb(withManut);
-          } else {
-            setDb(updated);
+          const ws = getActiveWorkspace(next);
+          if (!ws.months[activeMonth.monthKey]) {
+            next = await api.ensureMonth(activeMonth.monthKey);
           }
-          showToast('Salario actual y preferencias guardados');
+          setDb(next);
+          showToast(`Configuración y salario (${payload.currencyCode}) actualizados`);
         }}
       />
 
-      {toast && <div className="toast-banner">✓ {toast}</div>}
+      {toast && <div className="toast-banner">{toast}</div>}
     </div>
   );
 };

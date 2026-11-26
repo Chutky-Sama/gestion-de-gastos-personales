@@ -1,16 +1,28 @@
-import React, { useState } from 'react';
-import { ArrowDownCircle, ArrowUpCircle, Crosshair, X } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import {
+  ArrowDownCircle,
+  ArrowUpCircle,
+  Banknote,
+  Crosshair,
+  Smartphone,
+  X,
+} from 'lucide-react';
 import { getTodayDateString, round2 } from '../../shared/calculations';
+import { PaymentMethod } from '../../shared/types';
 import { formatMoney } from '../utils/format';
 
 interface AdjustBalanceModalProps {
   isOpen: boolean;
   onClose: () => void;
-  currentBalance: number;
+  currentEfectivo: number;
+  currentTransferencia: number;
+  defaultChannel?: PaymentMethod;
   currencySymbol: string;
+  currencyCode: string;
   monthLabel: string;
   onConfirm: (payload: {
     mode: 'delta' | 'target';
+    paymentMethod: PaymentMethod;
     delta?: number;
     targetBalance?: number;
     reason?: string;
@@ -21,37 +33,55 @@ interface AdjustBalanceModalProps {
 export const AdjustBalanceModal: React.FC<AdjustBalanceModalProps> = ({
   isOpen,
   onClose,
-  currentBalance,
+  currentEfectivo,
+  currentTransferencia,
+  defaultChannel = 'efectivo',
   currencySymbol,
+  currencyCode,
   monthLabel,
   onConfirm,
 }) => {
+  const [channel, setChannel] = useState<PaymentMethod>(defaultChannel);
   const [tab, setTab] = useState<'up' | 'down' | 'target'>('up');
   const [amountStr, setAmountStr] = useState('');
   const [reason, setReason] = useState('');
   const [date, setDate] = useState(getTodayDateString());
   const [saving, setSaving] = useState(false);
 
+  useEffect(() => {
+    if (isOpen) {
+      setChannel(defaultChannel);
+      setDate(getTodayDateString());
+    }
+  }, [isOpen, defaultChannel]);
+
   if (!isOpen) return null;
+
+  const activeChannelBalance =
+    channel === 'transferencia' ? currentTransferencia : currentEfectivo;
+  const otherChannelBalance =
+    channel === 'transferencia' ? currentEfectivo : currentTransferencia;
 
   const parsed = parseFloat(amountStr);
   const validNum = !Number.isNaN(parsed) && parsed >= 0;
 
-  let previewBalance = currentBalance;
+  let previewChannelBalance = activeChannelBalance;
   let previewDiff = 0;
 
   if (validNum) {
     if (tab === 'up') {
       previewDiff = round2(parsed);
-      previewBalance = round2(currentBalance + parsed);
+      previewChannelBalance = round2(activeChannelBalance + parsed);
     } else if (tab === 'down') {
       previewDiff = round2(-parsed);
-      previewBalance = round2(currentBalance - parsed);
+      previewChannelBalance = round2(activeChannelBalance - parsed);
     } else {
-      previewBalance = round2(parsed);
-      previewDiff = round2(parsed - currentBalance);
+      previewChannelBalance = round2(parsed);
+      previewDiff = round2(parsed - activeChannelBalance);
     }
   }
+
+  const previewGeneralTotal = round2(previewChannelBalance + otherChannelBalance);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -61,6 +91,7 @@ export const AdjustBalanceModal: React.FC<AdjustBalanceModalProps> = ({
       if (tab === 'target') {
         await onConfirm({
           mode: 'target',
+          paymentMethod: channel,
           targetBalance: round2(parsed),
           reason: reason.trim() || undefined,
           date,
@@ -68,6 +99,7 @@ export const AdjustBalanceModal: React.FC<AdjustBalanceModalProps> = ({
       } else {
         await onConfirm({
           mode: 'delta',
+          paymentMethod: channel,
           delta: tab === 'up' ? round2(parsed) : round2(-parsed),
           reason: reason.trim() || undefined,
           date,
@@ -85,39 +117,74 @@ export const AdjustBalanceModal: React.FC<AdjustBalanceModalProps> = ({
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal-panel" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
-          <h3>Modificar Dinero General · {monthLabel}</h3>
+          <h3>
+            Modificar Saldo ({currencyCode}) · {monthLabel}
+          </h3>
           <button type="button" className="icon-btn" onClick={onClose} aria-label="Cerrar">
             <X size={18} />
           </button>
         </div>
 
-        <p style={{ margin: '0 0 14px', fontSize: '0.86rem', color: 'var(--text-secondary)' }}>
-          Ajusta el dinero total que tienes en el mes (como el cuadre de saldo{' '}
-          <span className="mono">残高調整</span> de las libretas asiáticas). Quedará asentado en tu
-          libreta con fecha y motivo.
+        <p style={{ margin: '0 0 12px', fontSize: '0.84rem', color: 'var(--text-secondary)' }}>
+          Elige si deseas ajustar tu dinero en <strong>Efectivo</strong> o en{' '}
+          <strong>Transferencia</strong>. Quedará registrado en tu libreta en paralelo.
         </p>
 
+        {/* Channel Selector */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '14px' }}>
+          <button
+            type="button"
+            className={`btn ${channel === 'efectivo' ? 'btn-emerald' : 'btn-ghost'}`}
+            style={{ justifyContent: 'space-between', padding: '10px 12px' }}
+            onClick={() => {
+              setChannel('efectivo');
+              if (tab === 'target') setAmountStr(String(currentEfectivo));
+            }}
+          >
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+              <Banknote size={16} /> Efectivo
+            </span>
+            <span className="mono">{formatMoney(currentEfectivo, currencySymbol)}</span>
+          </button>
+
+          <button
+            type="button"
+            className={`btn ${channel === 'transferencia' ? 'btn-violet' : 'btn-ghost'}`}
+            style={{ justifyContent: 'space-between', padding: '10px 12px' }}
+            onClick={() => {
+              setChannel('transferencia');
+              if (tab === 'target') setAmountStr(String(currentTransferencia));
+            }}
+          >
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+              <Smartphone size={16} /> Transferencia
+            </span>
+            <span className="mono">{formatMoney(currentTransferencia, currencySymbol)}</span>
+          </button>
+        </div>
+
+        {/* Action Mode */}
         <div style={{ display: 'flex', gap: '8px', marginBottom: '16px', flexWrap: 'wrap' }}>
           <button
             type="button"
             className={`btn btn-sm ${tab === 'up' ? 'btn-emerald' : 'btn-ghost'}`}
             onClick={() => setTab('up')}
           >
-            <ArrowUpCircle size={15} /> Subir Dinero (+)
+            <ArrowUpCircle size={15} /> Subir (+)
           </button>
           <button
             type="button"
             className={`btn btn-sm ${tab === 'down' ? 'btn-magenta' : 'btn-ghost'}`}
             onClick={() => setTab('down')}
           >
-            <ArrowDownCircle size={15} /> Bajar Dinero (-)
+            <ArrowDownCircle size={15} /> Bajar (-)
           </button>
           <button
             type="button"
             className={`btn btn-sm ${tab === 'target' ? 'btn-cyan' : 'btn-ghost'}`}
             onClick={() => {
               setTab('target');
-              setAmountStr(String(currentBalance));
+              setAmountStr(String(activeChannelBalance));
             }}
           >
             <Crosshair size={15} /> Fijar Monto Exacto
@@ -129,10 +196,10 @@ export const AdjustBalanceModal: React.FC<AdjustBalanceModalProps> = ({
             <div>
               <label className="field-label">
                 {tab === 'up'
-                  ? `Monto a sumar (${currencySymbol})`
+                  ? `Sumar a ${channel === 'efectivo' ? 'Efectivo' : 'Transferencia'} (${currencySymbol})`
                   : tab === 'down'
-                  ? `Monto a descontar (${currencySymbol})`
-                  : `Dinero real que tienes hoy (${currencySymbol})`}
+                  ? `Restar de ${channel === 'efectivo' ? 'Efectivo' : 'Transferencia'} (${currencySymbol})`
+                  : `Saldo real en ${channel === 'efectivo' ? 'Efectivo' : 'Transferencia'} (${currencySymbol})`}
               </label>
               <input
                 type="number"
@@ -148,7 +215,7 @@ export const AdjustBalanceModal: React.FC<AdjustBalanceModalProps> = ({
             </div>
 
             <div>
-              <label className="field-label">Fecha del ajuste</label>
+              <label className="field-label">Fecha</label>
               <input
                 type="date"
                 className="neon-input mono-input"
@@ -164,11 +231,9 @@ export const AdjustBalanceModal: React.FC<AdjustBalanceModalProps> = ({
               type="text"
               className="neon-input"
               placeholder={
-                tab === 'up'
-                  ? 'Ej. Bono extra, comisión recibida, venta rápida...'
-                  : tab === 'down'
-                  ? 'Ej. Salida imprevista, efectivo gastado, ajuste...'
-                  : 'Ej. Arqueo real de cuentas y efectivo hoy'
+                channel === 'efectivo'
+                  ? 'Ej. Efectivo recibido, cuadre de cartera...'
+                  : 'Ej. Transfermóvil recibido, ajuste de tarjeta...'
               }
               value={reason}
               onChange={(e) => setReason(e.target.value)}
@@ -181,24 +246,22 @@ export const AdjustBalanceModal: React.FC<AdjustBalanceModalProps> = ({
               border: '1px solid var(--border-subtle)',
               borderRadius: '10px',
               padding: '12px 14px',
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              flexWrap: 'wrap',
+              display: 'grid',
+              gridTemplateColumns: '1fr 1fr 1fr',
               gap: '10px',
             }}
           >
             <div>
-              <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
-                Saldo General Actual
+              <div style={{ fontSize: '0.73rem', color: 'var(--text-secondary)' }}>
+                Nuevo {channel === 'efectivo' ? 'Efectivo' : 'Transf.'}
               </div>
-              <div className="mono" style={{ fontWeight: 700 }}>
-                {formatMoney(currentBalance, currencySymbol)}
+              <div className="mono text-emerald" style={{ fontWeight: 700 }}>
+                {formatMoney(previewChannelBalance, currencySymbol)}
               </div>
             </div>
 
             <div style={{ textAlign: 'center' }}>
-              <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Variación</div>
+              <div style={{ fontSize: '0.73rem', color: 'var(--text-secondary)' }}>Variación</div>
               <div
                 className={`mono ${
                   previewDiff > 0 ? 'text-emerald' : previewDiff < 0 ? 'text-magenta' : ''
@@ -210,11 +273,11 @@ export const AdjustBalanceModal: React.FC<AdjustBalanceModalProps> = ({
             </div>
 
             <div style={{ textAlign: 'right' }}>
-              <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
-                Nuevo Dinero General
+              <div style={{ fontSize: '0.73rem', color: 'var(--text-secondary)' }}>
+                Total General ({currencyCode})
               </div>
-              <div className="mono text-cyan" style={{ fontWeight: 700, fontSize: '1.08rem' }}>
-                {formatMoney(previewBalance, currencySymbol)}
+              <div className="mono text-cyan" style={{ fontWeight: 700 }}>
+                {formatMoney(previewGeneralTotal, currencySymbol)}
               </div>
             </div>
           </div>

@@ -5,10 +5,12 @@ import {
   KakeiboPillar,
   MonthAllocations,
   MonthReflection,
+  PaymentMethod,
+  TransferDirection,
 } from '../shared/types';
 import { desktopEngine } from './desktopEngine';
 
-const LOCAL_MIRROR_KEY = 'neon_kakeibo_mirror_v1';
+const LOCAL_MIRROR_KEY = 'neon_kakeibo_mirror_v2';
 
 export interface DesktopInfo {
   isDesktop: boolean;
@@ -55,7 +57,6 @@ function startDesktopHeartbeat(): void {
       }
     });
   } catch {
-    // Fallback polling if EventSource unavailable
     const ping = () => {
       fetch('/api/desktop/ping', { method: 'POST', keepalive: true }).catch(() => {});
     };
@@ -66,9 +67,7 @@ function startDesktopHeartbeat(): void {
 
 async function requestJson<T>(url: string, options?: RequestInit): Promise<T> {
   const res = await fetch(url, {
-    headers: {
-      'Content-Type': 'application/json',
-    },
+    headers: { 'Content-Type': 'application/json' },
     ...options,
   });
 
@@ -105,10 +104,32 @@ export const api = {
     return requestJson<AppDatabase>('/api/state');
   },
 
+  selectCurrency: async (currencyCode: string) => {
+    const info = await getDesktopInfo();
+    if (info.isDesktop) return desktopEngine.selectCurrency(currencyCode);
+    return requestJson<AppDatabase>('/api/currency/select', {
+      method: 'PUT',
+      body: JSON.stringify({ currencyCode }),
+    });
+  },
+
+  updateEnabledCurrencies: async (enabledCurrencies: string[], activeCurrency?: string) => {
+    const info = await getDesktopInfo();
+    if (info.isDesktop) {
+      return desktopEngine.updateEnabledCurrencies(enabledCurrencies, activeCurrency);
+    }
+    return requestJson<AppDatabase>('/api/currency/enabled', {
+      method: 'PUT',
+      body: JSON.stringify({ enabledCurrencies, activeCurrency }),
+    });
+  },
+
   updateProfile: async (payload: {
     ledgerName?: string;
     currencyCode?: string;
-    currencySymbol?: string;
+    enabledCurrencies?: string[];
+    currentSalaryEfectivo?: number;
+    currentSalaryTransferencia?: number;
     currentSalary?: number;
     hasManutencionesDefault?: boolean;
     syncMonthKey?: string;
@@ -134,7 +155,11 @@ export const api = {
     monthKey: string,
     payload: {
       salary?: number;
+      salaryEfectivo?: number;
+      salaryTransferencia?: number;
       carryover?: number;
+      carryoverEfectivo?: number;
+      carryoverTransferencia?: number;
       hasManutenciones?: boolean;
       allocations?: MonthAllocations;
       reflection?: Partial<MonthReflection>;
@@ -155,10 +180,13 @@ export const api = {
       date: string;
       type: EntryType;
       amount: number;
+      paymentMethod?: PaymentMethod;
+      transferDirection?: TransferDirection;
+      transferFee?: number;
       concept: string;
       division: string;
       investmentId?: string;
-      pillar: KakeiboPillar;
+      pillar?: KakeiboPillar;
       note?: string;
     }
   ) => {
@@ -177,6 +205,9 @@ export const api = {
       date?: string;
       type?: EntryType;
       amount?: number;
+      paymentMethod?: PaymentMethod;
+      transferDirection?: TransferDirection;
+      transferFee?: number;
       concept?: string;
       division?: string;
       investmentId?: string;
@@ -204,6 +235,7 @@ export const api = {
     monthKey: string,
     payload: {
       mode: 'delta' | 'target';
+      paymentMethod?: PaymentMethod;
       delta?: number;
       targetBalance?: number;
       reason?: string;
@@ -257,9 +289,7 @@ export const api = {
   deleteInvestment: async (id: string) => {
     const info = await getDesktopInfo();
     if (info.isDesktop) return desktopEngine.deleteInvestment(id);
-    return requestJson<AppDatabase>(`/api/investments/${id}`, {
-      method: 'DELETE',
-    });
+    return requestJson<AppDatabase>(`/api/investments/${id}`, { method: 'DELETE' });
   },
 
   loadDemo: async () => {
