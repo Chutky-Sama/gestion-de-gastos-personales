@@ -7,18 +7,19 @@ import {
   FileSpreadsheet,
   FolderOpen,
   History,
-  RotateCcw,
+  LogOut,
+  ShieldCheck,
   Sparkles,
   Upload,
 } from 'lucide-react';
 import {
   computeAllTimeInvestmentTotals,
   computeMonthSummary,
-  daysSinceFirstUse,
   formatMonthLabel,
-  round2,
 } from '../../shared/calculations';
-import { AppDatabase } from '../../shared/types';
+import { canExitDemoReset, canStartDemo } from '../../shared/ledgerCore';
+import { AppDatabase, CurrencyLedgerWorkspace } from '../../shared/types';
+import { DesktopInfo } from '../api';
 import {
   exportAllEntriesAsCsv,
   exportDatabaseAsJson,
@@ -28,72 +29,72 @@ import {
 
 interface HistoryTabProps {
   db: AppDatabase;
-  activeMonthKey: string;
-  desktopStoragePath?: string;
-  onOpenDataFolder?: () => Promise<void>;
+  activeWorkspace: CurrencyLedgerWorkspace;
+  desktopInfo: DesktopInfo;
   onSelectMonth: (monthKey: string) => void;
   onLoadDemo: () => Promise<void>;
-  onResetClean: () => Promise<void>;
+  onExitDemoReset: () => Promise<void>;
   onImportBackup: (backup: AppDatabase) => Promise<void>;
+  onOpenDesktopFolder: () => Promise<void>;
 }
 
 export const HistoryTab: React.FC<HistoryTabProps> = ({
   db,
-  activeMonthKey,
-  desktopStoragePath,
-  onOpenDataFolder,
+  activeWorkspace,
+  desktopInfo,
   onSelectMonth,
   onLoadDemo,
-  onResetClean,
+  onExitDemoReset,
   onImportBackup,
+  onOpenDesktopFolder,
 }) => {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const [confirmReset, setConfirmReset] = useState(false);
+  const [confirmExitDemo, setConfirmExitDemo] = useState(false);
+  const currencySymbol = activeWorkspace.currencySymbol;
+  const currencyCode = activeWorkspace.currencyCode;
 
-  const sym = db.profile.currencySymbol;
-  const activeDays = daysSinceFirstUse(db.firstUseDate);
+  const sortedMonthKeys = useMemo(
+    () => Object.keys(activeWorkspace.months).sort().reverse(),
+    [activeWorkspace.months]
+  );
 
-  const archiveData = useMemo(() => {
-    const allTimeInv = computeAllTimeInvestmentTotals(db);
-    const sortedKeys = Object.keys(db.months).sort().reverse();
+  const monthSummaries = useMemo(
+    () =>
+      sortedMonthKeys.map((mk) => ({
+        month: activeWorkspace.months[mk],
+        summary: computeMonthSummary(activeWorkspace.months[mk], activeWorkspace.investments),
+      })),
+    [sortedMonthKeys, activeWorkspace]
+  );
 
-    let lifetimeInflow = 0;
-    let lifetimeOutflow = 0;
-    let lifetimeInvested = 0;
-    let lifetimeDebtPaid = 0;
-    let totalEntriesCount = 0;
+  const lifetimeStats = useMemo(() => {
+    let totalEntries = 0;
+    let totalSavedInvested = 0;
+    let totalExpenses = 0;
 
-    const monthRows = sortedKeys.map((mk) => {
-      const m = db.months[mk];
-      const s = computeMonthSummary(m, db.investments, allTimeInv);
-      // Avoid double counting carryover in lifetime inflow: count salary + extra income + adjustments_up
-      lifetimeInflow = round2(
-        lifetimeInflow + s.salary + s.totalExtraIncome + s.totalAdjustmentsUp
-      );
-      lifetimeOutflow = round2(lifetimeOutflow + s.totalOutflowAll);
-      lifetimeInvested = round2(lifetimeInvested + s.envelopes.inversiones.spent);
-      lifetimeDebtPaid = round2(lifetimeDebtPaid + s.envelopes.deudas.spent);
-      totalEntriesCount += m.entries.length;
+    for (const ms of monthSummaries) {
+      totalEntries += ms.month.entries.length;
+      totalExpenses += ms.summary.totalOutflowAll;
+    }
 
-      return {
-        monthKey: mk,
-        label: formatMonthLabel(mk),
-        entriesCount: m.entries.length,
-        summary: s,
-      };
-    });
+    const invTotals = computeAllTimeInvestmentTotals(
+      activeWorkspace.months,
+      activeWorkspace.investments
+    );
+    totalSavedInvested = Object.values(invTotals).reduce((a, b) => a + b, 0);
 
     return {
-      monthRows,
-      lifetimeInflow,
-      lifetimeOutflow,
-      lifetimeInvested,
-      lifetimeDebtPaid,
-      totalEntriesCount,
+      monthsTracked: monthSummaries.length,
+      totalEntries,
+      totalSavedInvested,
+      totalExpenses,
     };
-  }, [db]);
+  }, [monthSummaries, activeWorkspace]);
 
-  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const demoAvailable = canStartDemo(db);
+  const exitDemoAvailable = canExitDemoReset(db);
+
+  const handleFileImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     try {
@@ -109,7 +110,7 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
 
   return (
     <div>
-      {/* Day-1 Banner & Lifetime Totals */}
+      {/* Day-1 Continuity Banner */}
       <div className="neon-card card-emerald" style={{ marginBottom: '20px' }}>
         <div
           style={{
@@ -118,241 +119,266 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
             alignItems: 'center',
             gap: '16px',
             flexWrap: 'wrap',
-            marginBottom: '18px',
           }}
         >
           <div>
-            <div className="kpi-label" style={{ color: 'var(--neon-emerald)' }}>
-              <History size={16} /> REGISTRO PERMANENTE DESDE EL DÍA 1 · 全期間記録
+            <div
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '8px',
+                color: 'var(--neon-emerald)',
+                fontSize: '0.8rem',
+                fontWeight: 700,
+                textTransform: 'uppercase',
+                letterSpacing: '0.06em',
+                marginBottom: '6px',
+              }}
+            >
+              <ShieldCheck size={17} /> Registro Continuo Activo Desde el Día 1
             </div>
-            <h3 style={{ margin: '6px 0 4px', fontSize: '1.2rem' }}>
-              Iniciado el {formatFullDateTime(db.firstUseDate)} · Día #{activeDays} de seguimiento
+            <h3 style={{ margin: '0 0 4px', fontSize: '1.15rem' }}>
+              Iniciada el {formatFullDateTime(db.firstUseDate)}
             </h3>
             <p style={{ margin: 0, fontSize: '0.84rem', color: 'var(--text-secondary)' }}>
-              Todos tus meses, cambios de salario, inversiones y movimientos se guardan
-              automáticamente en tu disco local (
-              <span className="mono">{desktopStoragePath || 'data/kakeibo-store.json'}</span>).
+              Último guardado automático: {formatFullDateTime(db.lastUpdatedAt)} · Todas tus
+              monedas ({db.profile.enabledCurrencies.join(', ')}) y saldos en Efectivo /
+              Transferencia se guardan de forma permanente.
             </p>
+            {desktopInfo.isDesktop && desktopInfo.storagePath && (
+              <div
+                style={{
+                  marginTop: '8px',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '10px',
+                  flexWrap: 'wrap',
+                  padding: '6px 10px',
+                  borderRadius: '8px',
+                  background: 'rgba(0, 240, 255, 0.07)',
+                  border: '1px solid rgba(0, 240, 255, 0.25)',
+                  fontSize: '0.78rem',
+                }}
+              >
+                <span className="mono text-cyan">Archivo en tu PC: {desktopInfo.storagePath}</span>
+                <button
+                  type="button"
+                  className="btn btn-sm btn-ghost"
+                  style={{ padding: '3px 8px', fontSize: '0.74rem' }}
+                  onClick={onOpenDesktopFolder}
+                >
+                  <FolderOpen size={13} /> Abrir carpeta de datos
+                </button>
+              </div>
+            )}
           </div>
 
-          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-            {desktopStoragePath && onOpenDataFolder && (
-              <button
-                type="button"
-                className="btn btn-sm btn-violet"
-                onClick={onOpenDataFolder}
-              >
-                <FolderOpen size={14} /> Abrir Carpeta en Windows
-              </button>
-            )}
+          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
             <button
               type="button"
-              className="btn btn-sm btn-cyan"
+              className="btn btn-cyan btn-sm"
               onClick={() => exportDatabaseAsJson(db)}
             >
-              <Download size={14} /> Descargar Respaldo (.JSON)
+              <Download size={14} /> Respaldo JSON
             </button>
+
             <button
               type="button"
-              className="btn btn-sm btn-emerald"
+              className="btn btn-emerald btn-sm"
               onClick={() => exportAllEntriesAsCsv(db)}
             >
-              <FileSpreadsheet size={14} /> Exportar Excel (.CSV)
+              <FileSpreadsheet size={14} /> Exportar CSV
             </button>
+
             <button
               type="button"
-              className="btn btn-sm btn-ghost"
+              className="btn btn-ghost btn-sm"
               onClick={() => fileInputRef.current?.click()}
             >
-              <Upload size={14} /> Restaurar Respaldo
+              <Upload size={14} /> Importar Respaldo
             </button>
             <input
               ref={fileInputRef}
               type="file"
-              accept=".json,application/json"
+              accept=".json"
               style={{ display: 'none' }}
-              onChange={handleFileChange}
+              onChange={handleFileImport}
             />
-          </div>
-        </div>
 
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))',
-            gap: '12px',
-          }}
-        >
-          <div
-            style={{
-              padding: '12px 14px',
-              borderRadius: '10px',
-              background: 'rgba(8, 12, 23, 0.78)',
-              border: '1px solid var(--border-subtle)',
-            }}
-          >
-            <div style={{ fontSize: '0.73rem', color: 'var(--text-secondary)' }}>
-              INGRESOS ACUMULADOS
-            </div>
-            <div className="mono text-cyan" style={{ fontSize: '1.25rem', fontWeight: 700, marginTop: '4px' }}>
-              {formatMoney(archiveData.lifetimeInflow, sym)}
-            </div>
-          </div>
+            {/* Single-use Demo button: ONLY shown if untouched & never used */}
+            {demoAvailable && (
+              <button
+                type="button"
+                className="btn btn-violet btn-sm"
+                onClick={onLoadDemo}
+                title="Prueba de un solo uso para explorar el programa antes de ingresar tus datos reales"
+              >
+                <Sparkles size={14} /> Probar Demo (1 solo uso)
+              </button>
+            )}
 
-          <div
-            style={{
-              padding: '12px 14px',
-              borderRadius: '10px',
-              background: 'rgba(8, 12, 23, 0.78)',
-              border: '1px solid var(--border-subtle)',
-            }}
-          >
-            <div style={{ fontSize: '0.73rem', color: 'var(--text-secondary)' }}>
-              SALIDAS Y GASTOS TOTALES
-            </div>
-            <div className="mono text-magenta" style={{ fontSize: '1.25rem', fontWeight: 700, marginTop: '4px' }}>
-              {formatMoney(archiveData.lifetimeOutflow, sym)}
-            </div>
-          </div>
+            {/* Single-use Reset button: EXCLUSIVELY shown while inside the 1-time Demo */}
+            {exitDemoAvailable &&
+              (!confirmExitDemo ? (
+                <button
+                  type="button"
+                  className="btn btn-magenta btn-sm"
+                  onClick={() => setConfirmExitDemo(true)}
+                >
+                  <LogOut size={14} /> Salir de Demo y Reiniciar para Uso Real (1 solo uso)
+                </button>
+              ) : (
+                <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                  <button
+                    type="button"
+                    className="btn btn-magenta btn-sm"
+                    onClick={async () => {
+                      await onExitDemoReset();
+                      setConfirmExitDemo(false);
+                    }}
+                  >
+                    Confirmar: Limpiar Demo e Iniciar en Real
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    onClick={() => setConfirmExitDemo(false)}
+                  >
+                    Cancelar
+                  </button>
+                </div>
+              ))}
 
-          <div
-            style={{
-              padding: '12px 14px',
-              borderRadius: '10px',
-              background: 'rgba(8, 12, 23, 0.78)',
-              border: '1px solid var(--border-subtle)',
-            }}
-          >
-            <div style={{ fontSize: '0.73rem', color: 'var(--text-secondary)' }}>
-              TOTAL INVERTIDO HISTÓRICO
-            </div>
-            <div className="mono text-violet" style={{ fontSize: '1.25rem', fontWeight: 700, marginTop: '4px' }}>
-              {formatMoney(archiveData.lifetimeInvested, sym)}
-            </div>
-          </div>
-
-          <div
-            style={{
-              padding: '12px 14px',
-              borderRadius: '10px',
-              background: 'rgba(8, 12, 23, 0.78)',
-              border: '1px solid var(--border-subtle)',
-            }}
-          >
-            <div style={{ fontSize: '0.73rem', color: 'var(--text-secondary)' }}>
-              DEUDAS PAGADAS HISTÓRICO
-            </div>
-            <div className="mono text-amber" style={{ fontSize: '1.25rem', fontWeight: 700, marginTop: '4px' }}>
-              {formatMoney(archiveData.lifetimeDebtPaid, sym)}
-            </div>
+            {/* Permanent anti-wipe badge once in Real Mode */}
+            {!demoAvailable && !exitDemoAvailable && (
+              <span
+                className="div-badge div-emerald"
+                title="El reinicio del programa está bloqueado permanentemente para evitar que pierdas tus datos reales por accidente."
+                style={{ padding: '6px 10px' }}
+              >
+                <ShieldCheck size={14} /> Modo Real Protegido (Sin botón de reinicio accidental)
+              </span>
+            )}
           </div>
         </div>
       </div>
 
-      {/* Month-by-Month Ledger Archive */}
-      <div className="ledger-book" style={{ marginBottom: '22px' }}>
-        <div className="ledger-book-header">
-          <div className="ledger-book-title">
-            <Archive size={19} className="text-cyan" />
-            <div>
-              <h3>Archivo Mensual de Libretas ({archiveData.monthRows.length} meses)</h3>
-              <div style={{ fontSize: '0.77rem', color: 'var(--text-secondary)' }}>
-                Haz clic en cualquier mes para consultar o editar su libreta completa.
-              </div>
-            </div>
+      {/* Lifetime KPIs for active currency */}
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+          gap: '14px',
+          marginBottom: '20px',
+        }}
+      >
+        <div className="neon-card">
+          <div className="kpi-label">Meses en {currencyCode}</div>
+          <div className="mono text-cyan" style={{ fontSize: '1.55rem', fontWeight: 700 }}>
+            {lifetimeStats.monthsTracked}
           </div>
         </div>
 
-        <div className="ledger-table-wrap">
-          <table className="ledger-table">
-            <thead>
-              <tr>
-                <th>Mes</th>
-                <th className="num-col">Salario Base</th>
-                <th className="num-col">Extras / Ajustes (+)</th>
-                <th className="num-col">Salidas Totales (-)</th>
-                <th className="num-col">Invertido</th>
-                <th className="num-col">Saldo General</th>
-                <th style={{ textAlign: 'right' }}>Libreta</th>
-              </tr>
-            </thead>
-            <tbody>
-              {archiveData.monthRows.map((row) => {
-                const isCurrent = row.monthKey === activeMonthKey;
-                const extraUp = round2(
-                  row.summary.totalExtraIncome + row.summary.totalAdjustmentsUp
-                );
-                return (
-                  <tr key={row.monthKey}>
-                    <td>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <Calendar size={15} className="text-cyan" />
-                        <strong>{row.label}</strong>
-                        {isCurrent && <span className="div-badge div-cyan">Viendo ahora</span>}
-                        <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                          ({row.entriesCount} mov.)
-                        </span>
-                      </div>
-                    </td>
-                    <td className="num-col">{formatMoney(row.summary.salary, sym)}</td>
-                    <td className="num-col text-emerald">
-                      {extraUp > 0 ? formatMoney(extraUp, sym, true) : '—'}
-                    </td>
-                    <td className="num-col text-magenta">
-                      {row.summary.totalOutflowAll > 0
-                        ? `-${formatMoney(row.summary.totalOutflowAll, sym)}`
-                        : '—'}
-                    </td>
-                    <td className="num-col text-violet">
-                      {formatMoney(row.summary.envelopes.inversiones.spent, sym)}
-                    </td>
-                    <td
-                      className={`num-col ${
-                        row.summary.currentGeneralBalance < 0 ? 'text-magenta' : 'text-cyan'
+        <div className="neon-card">
+          <div className="kpi-label">Movimientos en {currencyCode}</div>
+          <div className="mono" style={{ fontSize: '1.55rem', fontWeight: 700 }}>
+            {lifetimeStats.totalEntries}
+          </div>
+        </div>
+
+        <div className="neon-card">
+          <div className="kpi-label">Invertido Histórico ({currencyCode})</div>
+          <div className="mono text-violet" style={{ fontSize: '1.55rem', fontWeight: 700 }}>
+            {formatMoney(lifetimeStats.totalSavedInvested, currencySymbol)}
+          </div>
+        </div>
+
+        <div className="neon-card">
+          <div className="kpi-label">Salidas Totales ({currencyCode})</div>
+          <div className="mono text-magenta" style={{ fontSize: '1.55rem', fontWeight: 700 }}>
+            {formatMoney(lifetimeStats.totalExpenses, currencySymbol)}
+          </div>
+        </div>
+      </div>
+
+      {/* Two Column: Monthly Archive + Day-1 Audit Log */}
+      <div className="two-col-grid">
+        <div className="neon-card">
+          <div className="kpi-header" style={{ marginBottom: '14px' }}>
+            <span className="kpi-label">
+              <Archive size={16} className="text-cyan" /> Archivo Mensual ({currencyCode}){' '}
+              <span className="asian-chip">月別アーカイブ</span>
+            </span>
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            {monthSummaries.map(({ month: m, summary: s }) => (
+              <div
+                key={m.monthKey}
+                style={{
+                  padding: '12px 14px',
+                  borderRadius: '10px',
+                  background: 'rgba(8, 12, 23, 0.72)',
+                  border: '1px solid var(--border-subtle)',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  gap: '12px',
+                  flexWrap: 'wrap',
+                }}
+              >
+                <div>
+                  <div
+                    style={{
+                      fontWeight: 700,
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                    }}
+                  >
+                    <Calendar size={14} className="text-cyan" />
+                    {formatMonthLabel(m.monthKey)}
+                  </div>
+                  <div
+                    style={{
+                      fontSize: '0.77rem',
+                      color: 'var(--text-secondary)',
+                      marginTop: '3px',
+                    }}
+                  >
+                    Efec:{' '}
+                    <span className="mono text-emerald">
+                      {formatMoney(s.currentEfectivoBalance, currencySymbol)}
+                    </span>{' '}
+                    · Transf:{' '}
+                    <span className="mono text-violet">
+                      {formatMoney(s.currentTransferenciaBalance, currencySymbol)}
+                    </span>
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                  <div style={{ textAlign: 'right' }}>
+                    <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                      Total General
+                    </div>
+                    <div
+                      className={`mono ${
+                        s.currentGeneralBalance < 0 ? 'text-magenta' : 'text-cyan'
                       }`}
                       style={{ fontWeight: 700 }}
                     >
-                      {formatMoney(row.summary.currentGeneralBalance, sym)}
-                    </td>
-                    <td style={{ textAlign: 'right' }}>
-                      <button
-                        type="button"
-                        className="btn btn-sm btn-ghost"
-                        onClick={() => onSelectMonth(row.monthKey)}
-                      >
-                        Abrir <ExternalLink size={13} />
-                      </button>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {/* Bottom Two Columns: Audit Log since Day 1 + Demo/Reset tools */}
-      <div className="two-col-grid">
-        <div className="neon-card">
-          <div className="kpi-header">
-            <span className="kpi-label">Bitácora de Eventos Desde el Día 1</span>
-            <span className="tab-badge">{db.historyLog.length}</span>
-          </div>
-
-          <div className="timeline-list">
-            {db.historyLog.map((ev) => (
-              <div key={ev.id} className="timeline-item">
-                <div>
-                  <div style={{ fontWeight: 600, fontSize: '0.88rem' }}>{ev.title}</div>
-                  <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', marginTop: '2px' }}>
-                    {ev.detail}
+                      {formatMoney(s.currentGeneralBalance, currencySymbol)}
+                    </div>
                   </div>
-                </div>
-                <div
-                  className="mono"
-                  style={{ fontSize: '0.73rem', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}
-                >
-                  {formatFullDateTime(ev.timestamp)}
+
+                  <button
+                    type="button"
+                    className="btn btn-sm btn-ghost"
+                    onClick={() => onSelectMonth(m.monthKey)}
+                  >
+                    Abrir <ExternalLink size={13} />
+                  </button>
                 </div>
               </div>
             ))}
@@ -360,60 +386,52 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
         </div>
 
         <div className="neon-card">
-          <div className="kpi-header">
-            <span className="kpi-label">Herramientas de Datos y Prueba</span>
+          <div className="kpi-header" style={{ marginBottom: '14px' }}>
+            <span className="kpi-label">
+              <History size={16} className="text-emerald" /> Bitácora Continua desde el Día 1{' '}
+              <span className="asian-chip">履歴ログ</span>
+            </span>
           </div>
-          <p style={{ margin: '0 0 14px', fontSize: '0.84rem', color: 'var(--text-secondary)' }}>
-            ¿Quieres ver cómo luce la libreta llena con un ejemplo completo, o prefieres limpiar
-            todo para empezar desde cero con tus datos reales?
-          </p>
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-            <button type="button" className="btn btn-violet" onClick={onLoadDemo}>
-              <Sparkles size={16} /> Cargar Mes de Ejemplo Completo (Demo)
-            </button>
-
-            {!confirmReset ? (
-              <button
-                type="button"
-                className="btn btn-ghost"
-                onClick={() => setConfirmReset(true)}
-              >
-                <RotateCcw size={15} /> Reiniciar Libreta en Blanco ($0.00)
-              </button>
-            ) : (
-              <div
-                style={{
-                  padding: '12px',
-                  borderRadius: '10px',
-                  background: 'var(--neon-magenta-dim)',
-                  border: '1px solid var(--neon-magenta)',
-                }}
-              >
-                <div style={{ fontSize: '0.82rem', marginBottom: '8px', fontWeight: 600 }}>
-                  ¿Seguro que deseas borrar los registros actuales y dejar la libreta en cero?
+          <div
+            className="timeline-list"
+            style={{ maxHeight: '460px', overflowY: 'auto', paddingRight: '6px' }}
+          >
+            {db.historyLog.map((ev) => (
+                <div key={ev.id} className="timeline-item">
+                  <div className="timeline-dot" />
+                  <div style={{ flex: 1 }}>
+                    <div
+                      style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        gap: '8px',
+                        flexWrap: 'wrap',
+                      }}
+                    >
+                      <strong style={{ fontSize: '0.88rem' }}>
+                        {ev.currencyCode ? `[${ev.currencyCode}] ` : ''}
+                        {ev.title}
+                      </strong>
+                      <span
+                        className="mono"
+                        style={{ fontSize: '0.73rem', color: 'var(--text-muted)' }}
+                      >
+                        {formatFullDateTime(ev.timestamp)}
+                      </span>
+                    </div>
+                    <div
+                      style={{
+                        fontSize: '0.8rem',
+                        color: 'var(--text-secondary)',
+                        marginTop: '2px',
+                      }}
+                    >
+                      {ev.detail}
+                    </div>
+                  </div>
                 </div>
-                <div style={{ display: 'flex', gap: '8px' }}>
-                  <button
-                    type="button"
-                    className="btn btn-sm btn-magenta"
-                    onClick={async () => {
-                      await onResetClean();
-                      setConfirmReset(false);
-                    }}
-                  >
-                    Sí, reiniciar desde cero
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn-sm btn-ghost"
-                    onClick={() => setConfirmReset(false)}
-                  >
-                    Cancelar
-                  </button>
-                </div>
-              </div>
-            )}
+              ))}
           </div>
         </div>
       </div>

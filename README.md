@@ -1,6 +1,6 @@
 # Neon Kakeibo · Programa de Escritorio para Windows (`NeonKakeibo.exe`)
 
-Sistema personal de gestión mensual de gastos e inversiones con estética **Cyber-Neon**, inspirado en las libretas tradicionales de finanzas del hogar de **Japón (*Kakeibo* 家計簿)**, **Corea (*Gagyebu* 가계부)** y **China (*Ji Zhang Ben* 记账本)**.
+Sistema personal de gestión mensual de gastos e inversiones con estética **Cyber-Neon**, inspirado en las libretas tradicionales de finanzas del hogar de **Japón (*Kakeibo* 家計簿)**, **Corea (*Gagyebu* 가계부)** y **China (*Ji Zhang Ben* 记账本)**, adaptado a la realidad de pagos en paralelo (**Efectivo** y **Transferencia**) y múltiples monedas (**CUP**, **USD**, **MLC**, **EUR**, etc.).
 
 ---
 
@@ -8,32 +8,35 @@ Sistema personal de gestión mensual de gastos e inversiones con estética **Cyb
 
 No necesitas instalar Node.js, ni Python, ni abrir ninguna consola:
 
-1. Descarga el archivo **`NeonKakeibo.exe`** directamente desde el repositorio (pesa menos de **1 MB** y trae todo integrado en un solo ejecutable).
+1. Descarga el archivo **`NeonKakeibo.exe`** directamente desde el repositorio (pesa ~675 KB y trae todo integrado en un solo ejecutable).
 2. Haz **doble clic en `NeonKakeibo.exe`**.
    > **Nota de Windows:** Como es un programa personal creado a medida (sin certificado comercial de Microsoft Store), la primera vez que lo abras puede aparecer el aviso azul *"Windows protegió su PC"*. Solo haz clic en **"Más información"** y luego en **"Ejecutar de todas formas"**.
-3. ¡Listo! Se abrirá en su propia ventana oscura de escritorio.
+3. ¡Listo! Se abrirá en su propia ventana oscura de escritorio. Si ya usabas una versión previa, tus datos anteriores se migran automáticamente sin perder nada.
 
 ### ¿Dónde se guardan tus registros desde el Día 1?
-* **Automáticamente en tu PC:** Todos tus meses, salarios, inversiones y movimientos se guardan al instante en:
+* **Automáticamente en tu PC:** Todos tus meses, monedas, salarios, inversiones y movimientos se guardan al instante en:
   `C:\Users\<TuUsuario>\AppData\Local\NeonKakeibo\kakeibo-store.json` (con respaldo automático `.bak.json`).
-  Así puedes mover `NeonKakeibo.exe` de *Descargas* a tu *Escritorio* sin perder jamás tus datos.
 * **Modo Portable (USB):** Si creas una carpeta llamada `datos_portables` justo al lado de `NeonKakeibo.exe`, el programa guardará todos tus datos dentro de esa carpeta para que puedas llevarlo en una memoria USB.
-* Dentro de la pestaña **Registro Día 1** tienes además un botón **"Abrir Carpeta en Windows"** y botones para exportar a **Excel (`.CSV`)** o respaldo **`.JSON`**.
+* Dentro de **Historial Día 1 y Respaldo** tienes un botón **"Abrir carpeta de datos"** y exportación directa a **Excel (`.CSV`)** o respaldo **`.JSON`**.
 
 ---
 
-## Funcionalidades Incluidas
+## Funcionalidades Principales
 
-* **Salario Actual y Moneda Configurable** (`$`, `RD$`, `MX$`, `COL$`, `S/`, `AR$`, `CLP$`, `€`, etc.).
+* **Control en Paralelo: Efectivo y Transferencia**:
+  * Configura tu salario e inicio de mes separando cuánto recibes en **Efectivo** y cuánto por **Transferencia**.
+  * Registra cada gasto, ingreso o aporte a inversión indicando si fue en **Efectivo** o **Transferencia**.
+  * **Pasar Efectivo ⇄ Transferencia:** Registra extracciones de *Caja Extra* / cajero o cambios entre transferencia y efectivo (con comisión opcional si aplica).
+  * **Columnas en paralelo en el Libro Diario:** Visualiza renglón por renglón tu **Saldo Efectivo**, **Saldo Transferencia** y **Total General**.
+  * **Ajuste directo (`+` / `-` / Monto exacto)** independiente para Efectivo o Transferencia.
+* **Monedas de Cuba y Multimoneda en Paralelo (`CUP`, `USD`, `MLC`, `EUR`...)**:
+  * Incluye **Peso Cubano (`CUP`)**, **Dólar Estadounidense (`USD`)**, **`MLC`**, **Euro (`EUR`)** y monedas internacionales adicionales.
+  * Cambia con 1 clic en la barra superior entre tu libreta en **`CUP`** y tu libreta en **`USD`** (u otras monedas habilitadas) sin mezclar saldos.
+* **Protección Anti-Borrado: Demo y Reinicio de Un Solo Uso**:
+  * Los datos de prueba **Demo** son estrictamente de **un solo uso**.
+  * La opción para **reiniciar / limpiar** el programa existe **únicamente una sola vez para salir de la Demo**. En cuanto pasas al uso real (o ingresas tus propios datos), el botón de reinicio queda **desactivado y oculto permanentemente** para que jamás puedas borrar tus registros reales por accidente.
 * **División Mensual por Sobres (`袋分け家計簿`)**:
-  1. **Gastos del Hogar** (monto directo o desglosado).
-  2. **Deudas** (monto directo o desglosado).
-  3. **Manutenciones (si hay)** (interruptor activable solo si aplica).
-  4. **Inversiones definibles** (crea y gestiona cada inversión individualmente con seguimiento mensual e histórico).
-  5. **Dinero de Bolsillo (`お小遣い · 용돈`)** calculado automáticamente si llega a quedar remanente.
-* **Libreta Asiática con Saldo General Vivo (`出納帳 · 입출금 잔액 · 收支结余`)**:
-  * Sube (`+`), baja (`-`) o cuadra a monto exacto el **Dinero General del Mes** en cualquier momento.
-  * Resumen por las **5 semanas del mes**, **Pilares Kakeibo** y **Reflexión Mensual**.
+  1. **Gastos del Hogar** · 2. **Deudas** · 3. **Manutenciones (si hay)** · 4. **Inversiones definibles** · 5. **Dinero de Bolsillo (`お小遣い · 용돈`)**.
 
 ---
 

@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import {
   AlertTriangle,
   ArrowRight,
+  Banknote,
   Check,
   Coins,
   CreditCard,
@@ -9,6 +10,7 @@ import {
   Home,
   Layers,
   Plus,
+  Smartphone,
   Sparkles,
   Trash2,
   TrendingUp,
@@ -34,9 +36,12 @@ interface EnvelopesTabProps {
   summary: MonthComputedSummary;
   investments: InvestmentDefinition[];
   currencySymbol: string;
+  currencyCode: string;
   onSavePlan: (payload: {
-    salary: number;
-    carryover: number;
+    salaryEfectivo: number;
+    salaryTransferencia: number;
+    carryoverEfectivo: number;
+    carryoverTransferencia: number;
     hasManutenciones: boolean;
     allocations: MonthAllocations;
     alsoUpdateCurrentSalary: boolean;
@@ -51,12 +56,16 @@ export const EnvelopesTab: React.FC<EnvelopesTabProps> = ({
   summary,
   investments,
   currencySymbol,
+  currencyCode,
   onSavePlan,
   onBringCarryover,
   onNavigateInvestments,
 }) => {
-  const [salaryStr, setSalaryStr] = useState(String(month.salary || 0));
-  const [carryoverStr, setCarryoverStr] = useState(String(month.carryover || 0));
+  const [salEfStr, setSalEfStr] = useState(String(summary.salaryEfectivo || 0));
+  const [salTrStr, setSalTrStr] = useState(String(summary.salaryTransferencia || 0));
+  const [carEfStr, setCarEfStr] = useState(String(summary.carryoverEfectivo || 0));
+  const [carTrStr, setCarTrStr] = useState(String(summary.carryoverTransferencia || 0));
+
   const [alsoUpdateSalary, setAlsoUpdateSalary] = useState(true);
   const [hasManutenciones, setHasManutenciones] = useState(month.hasManutenciones);
 
@@ -83,8 +92,10 @@ export const EnvelopesTab: React.FC<EnvelopesTabProps> = ({
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    setSalaryStr(String(month.salary || 0));
-    setCarryoverStr(String(month.carryover || 0));
+    setSalEfStr(String(summary.salaryEfectivo || 0));
+    setSalTrStr(String(summary.salaryTransferencia || 0));
+    setCarEfStr(String(summary.carryoverEfectivo || 0));
+    setCarTrStr(String(summary.carryoverTransferencia || 0));
     setHasManutenciones(month.hasManutenciones);
     setHogarDirect(String(month.allocations.hogar || 0));
     setDeudasDirect(String(month.allocations.deudas || 0));
@@ -95,10 +106,15 @@ export const EnvelopesTab: React.FC<EnvelopesTabProps> = ({
     setInvTargets(month.allocations.investmentTargets || {});
     setCustomEnvelopes(month.allocations.customEnvelopes || []);
     setDirty(false);
-  }, [month]);
+  }, [month, summary.salaryEfectivo, summary.salaryTransferencia, summary.carryoverEfectivo, summary.carryoverTransferencia]);
 
-  const parsedSalary = Math.max(0, parseFloat(salaryStr) || 0);
-  const parsedCarryover = parseFloat(carryoverStr) || 0;
+  const parsedSalEf = Math.max(0, parseFloat(salEfStr) || 0);
+  const parsedSalTr = Math.max(0, parseFloat(salTrStr) || 0);
+  const parsedCarEf = parseFloat(carEfStr) || 0;
+  const parsedCarTr = parseFloat(carTrStr) || 0;
+
+  const parsedSalaryTotal = round2(parsedSalEf + parsedSalTr);
+  const parsedCarryoverTotal = round2(parsedCarEf + parsedCarTr);
 
   const effHogar = getEffectiveAllocation(parseFloat(hogarDirect) || 0, hogarItems);
   const effDeudas = getEffectiveAllocation(parseFloat(deudasDirect) || 0, deudasItems);
@@ -119,8 +135,8 @@ export const EnvelopesTab: React.FC<EnvelopesTabProps> = ({
   );
 
   const livePool = round2(
-    parsedSalary +
-      parsedCarryover +
+    parsedSalaryTotal +
+      parsedCarryoverTotal +
       summary.totalExtraIncome +
       summary.totalAdjustmentsUp -
       summary.generalDirectOutflow
@@ -199,8 +215,10 @@ export const EnvelopesTab: React.FC<EnvelopesTabProps> = ({
     setSaving(true);
     try {
       await onSavePlan({
-        salary: round2(parsedSalary),
-        carryover: round2(parsedCarryover),
+        salaryEfectivo: round2(parsedSalEf),
+        salaryTransferencia: round2(parsedSalTr),
+        carryoverEfectivo: round2(parsedCarEf),
+        carryoverTransferencia: round2(parsedCarTr),
         hasManutenciones,
         alsoUpdateCurrentSalary: alsoUpdateSalary,
         allocations: {
@@ -222,7 +240,6 @@ export const EnvelopesTab: React.FC<EnvelopesTabProps> = ({
 
   return (
     <form onSubmit={handleSaveAll}>
-      {/* Sticky / Top Save Bar + Salary Definition */}
       <div className="neon-card card-cyan distribution-panel">
         <div
           style={{
@@ -236,12 +253,12 @@ export const EnvelopesTab: React.FC<EnvelopesTabProps> = ({
         >
           <div>
             <h3 style={{ margin: '0 0 4px', fontSize: '1.12rem' }}>
-              Planificación y División en Sobres · {formatMonthLabel(month.monthKey)}{' '}
+              División en Sobres ({currencyCode}) · {formatMonthLabel(month.monthKey)}{' '}
               <span className="asian-chip">袋分け家計簿</span>
             </h3>
             <p style={{ margin: 0, fontSize: '0.84rem', color: 'var(--text-secondary)' }}>
-              Define tu salario del mes y repártelo en partes claras. El remanente se asigna a tu
-              Dinero de Bolsillo si llega a quedar.
+              Define cuánto te entra en <strong>Efectivo</strong> y cuánto por{' '}
+              <strong>Transferencia</strong>, y reparte tu presupuesto mensual.
             </p>
           </div>
 
@@ -259,29 +276,50 @@ export const EnvelopesTab: React.FC<EnvelopesTabProps> = ({
           </button>
         </div>
 
-        {/* Salary & Carryover Inputs */}
+        {/* Parallel Salary & Carryover Inputs */}
         <div
           style={{
             display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))',
-            gap: '14px',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))',
+            gap: '12px',
             padding: '14px',
-            background: 'rgba(8, 12, 23, 0.72)',
+            background: 'rgba(8, 12, 23, 0.76)',
             borderRadius: '12px',
             border: '1px solid var(--border-subtle)',
             marginBottom: '16px',
           }}
         >
           <div>
-            <label className="field-label">Salario de este mes ({currencySymbol})</label>
+            <label className="field-label" style={{ color: 'var(--neon-emerald)' }}>
+              <Banknote size={13} style={{ verticalAlign: 'middle', marginRight: '4px' }} />
+              Salario en Efectivo ({currencySymbol})
+            </label>
             <input
               type="number"
               step="0.01"
               min="0"
               className="neon-input mono-input"
-              value={salaryStr}
+              value={salEfStr}
               onChange={(e) => {
-                setSalaryStr(e.target.value);
+                setSalEfStr(e.target.value);
+                setDirty(true);
+              }}
+            />
+          </div>
+
+          <div>
+            <label className="field-label" style={{ color: 'var(--neon-violet)' }}>
+              <Smartphone size={13} style={{ verticalAlign: 'middle', marginRight: '4px' }} />
+              Salario Transferencia ({currencySymbol})
+            </label>
+            <input
+              type="number"
+              step="0.01"
+              min="0"
+              className="neon-input mono-input"
+              value={salTrStr}
+              onChange={(e) => {
+                setSalTrStr(e.target.value);
                 setDirty(true);
               }}
             />
@@ -290,7 +328,7 @@ export const EnvelopesTab: React.FC<EnvelopesTabProps> = ({
                 display: 'inline-flex',
                 alignItems: 'center',
                 gap: '6px',
-                fontSize: '0.76rem',
+                fontSize: '0.73rem',
                 color: 'var(--text-secondary)',
                 marginTop: '6px',
                 cursor: 'pointer',
@@ -301,20 +339,34 @@ export const EnvelopesTab: React.FC<EnvelopesTabProps> = ({
                 checked={alsoUpdateSalary}
                 onChange={(e) => setAlsoUpdateSalary(e.target.checked)}
               />
-              Fijar también como mi Salario Actual general
+              Guardar como mi Salario Actual ({currencyCode})
             </label>
           </div>
 
           <div>
-            <label className="field-label">Saldo inicial / Arrastrado ({currencySymbol})</label>
-            <div style={{ display: 'flex', gap: '8px' }}>
+            <label className="field-label">Inicial Efectivo ({currencySymbol})</label>
+            <input
+              type="number"
+              step="0.01"
+              className="neon-input mono-input"
+              value={carEfStr}
+              onChange={(e) => {
+                setCarEfStr(e.target.value);
+                setDirty(true);
+              }}
+            />
+          </div>
+
+          <div>
+            <label className="field-label">Inicial Transferencia ({currencySymbol})</label>
+            <div style={{ display: 'flex', gap: '6px' }}>
               <input
                 type="number"
                 step="0.01"
                 className="neon-input mono-input"
-                value={carryoverStr}
+                value={carTrStr}
                 onChange={(e) => {
-                  setCarryoverStr(e.target.value);
+                  setCarTrStr(e.target.value);
                   setDirty(true);
                 }}
               />
@@ -322,31 +374,27 @@ export const EnvelopesTab: React.FC<EnvelopesTabProps> = ({
                 <button
                   type="button"
                   className="btn btn-sm btn-ghost"
-                  title={`Traer saldo final de ${formatMonthLabel(previousMonthKey)}`}
+                  title={`Traer Efectivo y Transferencia sobrantes de ${formatMonthLabel(previousMonthKey)}`}
                   onClick={() => onBringCarryover(previousMonthKey)}
                 >
                   Traer {previousMonthKey}
                 </button>
               )}
             </div>
-            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '6px' }}>
-              Dinero sobrante (o faltante) al arrancar el mes
-            </div>
           </div>
 
           <div>
-            <div className="field-label">Capital Total Planificable del Mes</div>
-            <div className="mono text-cyan" style={{ fontSize: '1.42rem', fontWeight: 700 }}>
+            <div className="field-label">Capital Total del Mes ({currencyCode})</div>
+            <div className="mono text-cyan" style={{ fontSize: '1.35rem', fontWeight: 700 }}>
               {formatMoney(livePool, currencySymbol)}
             </div>
-            <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '4px' }}>
-              Incluye salario + saldo inicial + ajustes/ingresos extra del mes
+            <div style={{ fontSize: '0.73rem', color: 'var(--text-secondary)', marginTop: '3px' }}>
+              Salario total: {formatMoney(parsedSalaryTotal, currencySymbol)}
             </div>
           </div>
         </div>
 
-        {/* Stacked Distribution Bar */}
-        <div className="kpi-label">Distribución Visual del Dinero del Mes</div>
+        <div className="kpi-label">Distribución Visual ({currencyCode})</div>
         <div className="stacked-bar">
           {pctHogar > 0 && (
             <div
@@ -425,7 +473,6 @@ export const EnvelopesTab: React.FC<EnvelopesTabProps> = ({
 
       {/* Envelope Cards Grid */}
       <div className="envelopes-grid">
-        {/* 1. Gastos del Hogar */}
         <div className="neon-card card-amber">
           <div className="envelope-card-header">
             <div>
@@ -433,7 +480,7 @@ export const EnvelopesTab: React.FC<EnvelopesTabProps> = ({
                 <Home size={18} /> 1. Gastos del Hogar <span className="asian-chip">家計費</span>
               </h4>
               <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: '3px' }}>
-                Alquiler, electricidad, agua, internet, supermercado y básicos de casa.
+                Alimentos, electricidad, gas, internet y gastos básicos de casa.
               </div>
             </div>
             <div className="mono text-amber" style={{ fontWeight: 700, fontSize: '1.2rem' }}>
@@ -443,7 +490,7 @@ export const EnvelopesTab: React.FC<EnvelopesTabProps> = ({
 
           {hogarItems.length === 0 ? (
             <div>
-              <label className="field-label">Monto mensual asignado a Hogar ({currencySymbol})</label>
+              <label className="field-label">Monto asignado a Hogar ({currencySymbol})</label>
               <input
                 type="number"
                 step="0.01"
@@ -458,7 +505,7 @@ export const EnvelopesTab: React.FC<EnvelopesTabProps> = ({
             </div>
           ) : (
             <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
-              Calculado automáticamente sumando tus conceptos del hogar:
+              Calculado sumando tus conceptos del hogar:
             </div>
           )}
 
@@ -468,7 +515,7 @@ export const EnvelopesTab: React.FC<EnvelopesTabProps> = ({
                 <input
                   type="text"
                   className="neon-input"
-                  placeholder="Ej. Alquiler, Luz, Supermercado..."
+                  placeholder="Ej. Comida, Electricidad, Nauta..."
                   value={item.name}
                   onChange={(e) => updateSubItem(setHogarItems, item.id, 'name', e.target.value)}
                 />
@@ -501,7 +548,6 @@ export const EnvelopesTab: React.FC<EnvelopesTabProps> = ({
           </div>
         </div>
 
-        {/* 2. Deudas */}
         <div className="neon-card card-magenta">
           <div className="envelope-card-header">
             <div>
@@ -510,7 +556,7 @@ export const EnvelopesTab: React.FC<EnvelopesTabProps> = ({
                 <span className="asian-chip">負債返済</span>
               </h4>
               <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: '3px' }}>
-                Tarjetas de crédito, préstamos bancarios, financiamientos o deudas personales.
+                Préstamos, pagos pendientes o compromisos mensuales.
               </div>
             </div>
             <div className="mono text-magenta" style={{ fontWeight: 700, fontSize: '1.2rem' }}>
@@ -520,7 +566,7 @@ export const EnvelopesTab: React.FC<EnvelopesTabProps> = ({
 
           {deudasItems.length === 0 ? (
             <div>
-              <label className="field-label">Monto mensual para Deudas ({currencySymbol})</label>
+              <label className="field-label">Monto para Deudas ({currencySymbol})</label>
               <input
                 type="number"
                 step="0.01"
@@ -535,7 +581,7 @@ export const EnvelopesTab: React.FC<EnvelopesTabProps> = ({
             </div>
           ) : (
             <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
-              Suma automática de las cuotas de deuda de este mes:
+              Suma automática de tus deudas del mes:
             </div>
           )}
 
@@ -545,7 +591,7 @@ export const EnvelopesTab: React.FC<EnvelopesTabProps> = ({
                 <input
                   type="text"
                   className="neon-input"
-                  placeholder="Ej. Tarjeta Visa, Préstamo..."
+                  placeholder="Ej. Deuda pendiente, Cuota..."
                   value={item.name}
                   onChange={(e) => updateSubItem(setDeudasItems, item.id, 'name', e.target.value)}
                 />
@@ -572,7 +618,7 @@ export const EnvelopesTab: React.FC<EnvelopesTabProps> = ({
               <button
                 type="button"
                 className="btn btn-sm btn-ghost"
-                onClick={() => addSubItem(setDeudasItems, 'Cuota / Deuda')}
+                onClick={() => addSubItem(setDeudasItems, 'Deuda / Cuota')}
               >
                 <Plus size={14} /> Desglosar deuda específica
               </button>
@@ -580,7 +626,6 @@ export const EnvelopesTab: React.FC<EnvelopesTabProps> = ({
           </div>
         </div>
 
-        {/* 3. Manutenciones (si hay) */}
         <div className="neon-card">
           <div className="envelope-card-header">
             <div>
@@ -589,7 +634,7 @@ export const EnvelopesTab: React.FC<EnvelopesTabProps> = ({
                 <span className="asian-chip">扶養費</span>
               </h4>
               <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: '3px' }}>
-                Actívalo solo si tienes responsabilidades de manutención o apoyo familiar fijo.
+                Actívalo solo si tienes pagos de manutención o apoyo familiar fijo.
               </div>
             </div>
 
@@ -612,7 +657,7 @@ export const EnvelopesTab: React.FC<EnvelopesTabProps> = ({
               {manutItems.length === 0 ? (
                 <div>
                   <label className="field-label">
-                    Monto mensual en Manutenciones ({currencySymbol})
+                    Monto en Manutenciones ({currencySymbol})
                   </label>
                   <input
                     type="number"
@@ -628,7 +673,7 @@ export const EnvelopesTab: React.FC<EnvelopesTabProps> = ({
                 </div>
               ) : (
                 <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
-                  Total de manutenciones activas ({formatMoney(effManut, currencySymbol)}):
+                  Total de manutenciones ({formatMoney(effManut, currencySymbol)}):
                 </div>
               )}
 
@@ -638,7 +683,7 @@ export const EnvelopesTab: React.FC<EnvelopesTabProps> = ({
                     <input
                       type="text"
                       className="neon-input"
-                      placeholder="Ej. Manutención hijos, Apoyo padres..."
+                      placeholder="Ej. Manutención, Apoyo familiar..."
                       value={item.name}
                       onChange={(e) =>
                         updateSubItem(setManutItems, item.id, 'name', e.target.value)
@@ -684,22 +729,20 @@ export const EnvelopesTab: React.FC<EnvelopesTabProps> = ({
                 fontSize: '0.84rem',
               }}
             >
-              Desactivado este mes ($0.00). Si en algún momento tienes pagos de manutención, activa
-              el interruptor superior.
+              Desactivado este mes ({formatMoney(0, currencySymbol)}).
             </div>
           )}
         </div>
 
-        {/* 4. Inversiones */}
         <div className="neon-card card-violet">
           <div className="envelope-card-header">
             <div>
               <h4 className="envelope-card-title text-violet">
-                <TrendingUp size={18} /> 4. Inversiones Definidas{' '}
+                <TrendingUp size={18} /> 4. Inversiones ({currencyCode}){' '}
                 <span className="asian-chip">資産運用</span>
               </h4>
               <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: '3px' }}>
-                Define cuáles son tus inversiones y cuánto destinarás a cada una este mes.
+                Tus inversiones definidas en {currencyCode} para este mes.
               </div>
             </div>
             <div className="mono text-violet" style={{ fontWeight: 700, fontSize: '1.2rem' }}>
@@ -718,15 +761,14 @@ export const EnvelopesTab: React.FC<EnvelopesTabProps> = ({
               }}
             >
               <p style={{ margin: '0 0 10px', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-                Aún no has definido cuáles son tus inversiones (ej. ETFs, Cripto, Plazo Fijo,
-                Negocio).
+                Aún no has definido inversiones en {currencyCode}.
               </p>
               <button
                 type="button"
                 className="btn btn-violet btn-sm"
                 onClick={onNavigateInvestments}
               >
-                <Plus size={14} /> Definir Mis Inversiones
+                <Plus size={14} /> Definir Inversiones ({currencyCode})
               </button>
             </div>
           ) : (
@@ -781,7 +823,6 @@ export const EnvelopesTab: React.FC<EnvelopesTabProps> = ({
           )}
         </div>
 
-        {/* 5. Dinero de Bolsillo (si es que llega a quedar) */}
         <div
           className={`neon-card ${
             liveDeficit > 0 ? 'card-magenta' : livePocket > 0 ? 'card-emerald' : 'card-cyan'
@@ -802,7 +843,7 @@ export const EnvelopesTab: React.FC<EnvelopesTabProps> = ({
                 <span className="asian-chip">お小遣い · 용돈</span>
               </h4>
               <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: '3px' }}>
-                Calculado automáticamente descontando Hogar, Deudas, Manutenciones e Inversiones.
+                Remanente libre tras cubrir Hogar, Deudas, Manutenciones e Inversiones.
               </div>
             </div>
             <div
@@ -831,9 +872,8 @@ export const EnvelopesTab: React.FC<EnvelopesTabProps> = ({
             >
               <AlertTriangle size={18} />
               <span>
-                <strong>No queda dinero de bolsillo.</strong> Tus obligaciones e inversiones superan
-                tu dinero disponible del mes por{' '}
-                <strong className="mono">{formatMoney(liveDeficit, currencySymbol)}</strong>.
+                <strong>No queda dinero de bolsillo.</strong> Tus divisiones superan tu dinero del
+                mes por <strong className="mono">{formatMoney(liveDeficit, currencySymbol)}</strong>.
               </span>
             </div>
           ) : livePocket > 0 ? (
@@ -848,10 +888,10 @@ export const EnvelopesTab: React.FC<EnvelopesTabProps> = ({
               }}
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 700 }}>
-                <Sparkles size={16} /> ¡Sí te queda dinero de bolsillo este mes!
+                <Sparkles size={16} /> ¡Sí te queda dinero de bolsillo!
               </div>
               <div style={{ marginTop: '4px', color: 'var(--text-primary)', fontSize: '0.82rem' }}>
-                Gastado hasta hoy en bolsillo:{' '}
+                Usado:{' '}
                 <strong className="mono">
                   {formatMoney(summary.pocketMoneySpent, currencySymbol)}
                 </strong>{' '}
@@ -871,13 +911,11 @@ export const EnvelopesTab: React.FC<EnvelopesTabProps> = ({
                 color: 'var(--text-secondary)',
               }}
             >
-              Actualmente el 100% del dinero del mes está comprometido o aún no has ingresado tu
-              salario ($0.00 libre de bolsillo).
+              Actualmente no queda dinero de bolsillo libre ({formatMoney(0, currencySymbol)}).
             </div>
           )}
         </div>
 
-        {/* 6. Apartados Extra Opcionales */}
         <div className="neon-card">
           <div className="envelope-card-header">
             <div>
@@ -885,7 +923,7 @@ export const EnvelopesTab: React.FC<EnvelopesTabProps> = ({
                 <Layers size={18} /> Apartados Extra (Opcional)
               </h4>
               <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: '3px' }}>
-                ¿Necesitas otro sobre puntual este mes (ej. Salud, Reparación auto, Viaje)?
+                Sobres puntuales adicionales para este mes.
               </div>
             </div>
             <div className="mono text-cyan" style={{ fontWeight: 700, fontSize: '1.1rem' }}>
@@ -894,7 +932,9 @@ export const EnvelopesTab: React.FC<EnvelopesTabProps> = ({
           </div>
 
           {customEnvelopes.length > 0 && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '12px' }}>
+            <div
+              style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '12px' }}
+            >
               {customEnvelopes.map((ce) => (
                 <div key={ce.id} className="subitem-row">
                   <input
@@ -955,11 +995,7 @@ export const EnvelopesTab: React.FC<EnvelopesTabProps> = ({
               value={newCustomAmount}
               onChange={(e) => setNewCustomAmount(e.target.value)}
             />
-            <button
-              type="button"
-              className="btn btn-ghost"
-              onClick={handleAddCustomEnvelope}
-            >
+            <button type="button" className="btn btn-ghost" onClick={handleAddCustomEnvelope}>
               <Plus size={15} /> Crear
             </button>
           </div>
@@ -967,13 +1003,7 @@ export const EnvelopesTab: React.FC<EnvelopesTabProps> = ({
       </div>
 
       {dirty && (
-        <div
-          style={{
-            marginTop: '18px',
-            display: 'flex',
-            justifyContent: 'flex-end',
-          }}
-        >
+        <div style={{ marginTop: '18px', display: 'flex', justifyContent: 'flex-end' }}>
           <button type="submit" className="btn btn-emerald" disabled={saving}>
             <Check size={16} /> Guardar División del Mes Ahora
           </button>

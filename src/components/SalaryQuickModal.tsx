@@ -1,18 +1,20 @@
 import React, { useEffect, useState } from 'react';
-import { Wallet, X } from 'lucide-react';
-import { UserProfile } from '../../shared/types';
-import { CURRENCY_OPTIONS } from '../utils/format';
+import { Banknote, Plus, Smartphone, Wallet, X } from 'lucide-react';
+import { round2 } from '../../shared/calculations';
+import { AppDatabase } from '../../shared/types';
+import { CURRENCY_OPTIONS, findCurrencyOption, formatMoney } from '../utils/format';
 
 interface SalaryQuickModalProps {
   isOpen: boolean;
   onClose: () => void;
-  profile: UserProfile;
+  db: AppDatabase;
   monthLabel: string;
   onSave: (payload: {
     ledgerName: string;
     currencyCode: string;
-    currencySymbol: string;
-    currentSalary: number;
+    enabledCurrencies: string[];
+    currentSalaryEfectivo: number;
+    currentSalaryTransferencia: number;
     hasManutencionesDefault: boolean;
     applyToCurrentMonth: boolean;
   }) => Promise<void>;
@@ -21,13 +23,20 @@ interface SalaryQuickModalProps {
 export const SalaryQuickModal: React.FC<SalaryQuickModalProps> = ({
   isOpen,
   onClose,
-  profile,
+  db,
   monthLabel,
   onSave,
 }) => {
+  const profile = db.profile;
   const [ledgerName, setLedgerName] = useState(profile.ledgerName);
-  const [currencyCode, setCurrencyCode] = useState(profile.currencyCode);
-  const [salaryStr, setSalaryStr] = useState(String(profile.currentSalary || ''));
+  const [enabledCurrencies, setEnabledCurrencies] = useState<string[]>(
+    profile.enabledCurrencies || ['CUP', 'USD']
+  );
+  const [selectedCode, setSelectedCode] = useState(profile.currencyCode);
+  const [extraCurrencyToAdd, setExtraCurrencyToAdd] = useState('MLC');
+
+  const [salEfStr, setSalEfStr] = useState('');
+  const [salTrStr, setSalTrStr] = useState('');
   const [hasManutenciones, setHasManutenciones] = useState(profile.hasManutencionesDefault);
   const [applyToCurrentMonth, setApplyToCurrentMonth] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -35,28 +44,68 @@ export const SalaryQuickModal: React.FC<SalaryQuickModalProps> = ({
   useEffect(() => {
     if (isOpen) {
       setLedgerName(profile.ledgerName);
-      setCurrencyCode(profile.currencyCode);
-      setSalaryStr(profile.currentSalary > 0 ? String(profile.currentSalary) : '');
-      setHasManutenciones(profile.hasManutencionesDefault);
+      setEnabledCurrencies(profile.enabledCurrencies || ['CUP', 'USD']);
+      setSelectedCode(profile.currencyCode);
+      const ws = db.currencyWorkspaces[profile.currencyCode];
+      setSalEfStr(ws && ws.currentSalaryEfectivo > 0 ? String(ws.currentSalaryEfectivo) : '');
+      setSalTrStr(
+        ws && ws.currentSalaryTransferencia > 0 ? String(ws.currentSalaryTransferencia) : ''
+      );
+      setHasManutenciones(ws ? ws.hasManutencionesDefault : profile.hasManutencionesDefault);
       setApplyToCurrentMonth(true);
     }
-  }, [isOpen, profile]);
+  }, [isOpen, db, profile]);
 
   if (!isOpen) return null;
 
-  const selectedCurrency =
-    CURRENCY_OPTIONS.find((c) => c.code === currencyCode) || CURRENCY_OPTIONS[0];
+  const handleSwitchConfigCurrency = (code: string) => {
+    setSelectedCode(code);
+    const ws = db.currencyWorkspaces[code];
+    setSalEfStr(ws && ws.currentSalaryEfectivo > 0 ? String(ws.currentSalaryEfectivo) : '');
+    setSalTrStr(
+      ws && ws.currentSalaryTransferencia > 0 ? String(ws.currentSalaryTransferencia) : ''
+    );
+    setHasManutenciones(ws ? ws.hasManutencionesDefault : false);
+  };
+
+  const toggleCurrencyEnabled = (code: string) => {
+    setEnabledCurrencies((prev) => {
+      if (prev.includes(code)) {
+        if (prev.length <= 1) return prev; // Always keep at least 1 currency
+        const filtered = prev.filter((c) => c !== code);
+        if (selectedCode === code) {
+          handleSwitchConfigCurrency(filtered[0]);
+        }
+        return filtered;
+      }
+      return [...prev, code];
+    });
+  };
+
+  const selectedOpt = findCurrencyOption(selectedCode);
+  const parsedEf = round2(Math.max(0, parseFloat(salEfStr) || 0));
+  const parsedTr = round2(Math.max(0, parseFloat(salTrStr) || 0));
+  const totalSalary = round2(parsedEf + parsedTr);
+
+  const quickCubanCodes = ['CUP', 'USD', 'MLC', 'EUR'];
+  const otherOptions = CURRENCY_OPTIONS.filter(
+    (c) => !quickCubanCodes.includes(c.code) && !enabledCurrencies.includes(c.code)
+  );
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const numericSalary = Math.max(0, parseFloat(salaryStr) || 0);
     setSaving(true);
     try {
+      const finalEnabled = enabledCurrencies.includes(selectedCode)
+        ? enabledCurrencies
+        : [...enabledCurrencies, selectedCode];
+
       await onSave({
         ledgerName: ledgerName.trim() || 'Mi Libreta Kakeibo',
-        currencyCode: selectedCurrency.code,
-        currencySymbol: selectedCurrency.symbol,
-        currentSalary: numericSalary,
+        currencyCode: selectedCode,
+        enabledCurrencies: finalEnabled,
+        currentSalaryEfectivo: parsedEf,
+        currentSalaryTransferencia: parsedTr,
         hasManutencionesDefault: hasManutenciones,
         applyToCurrentMonth,
       });
@@ -68,10 +117,14 @@ export const SalaryQuickModal: React.FC<SalaryQuickModalProps> = ({
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal-panel" onClick={(e) => e.stopPropagation()}>
+      <div
+        className="modal-panel"
+        style={{ maxWidth: '580px' }}
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="modal-header">
           <h3 style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <Wallet size={19} /> Definir Salario Actual y Moneda
+            <Wallet size={19} /> Salario Actual, Monedas (CUP / USD) y Vías
           </h3>
           <button type="button" className="icon-btn" onClick={onClose} aria-label="Cerrar">
             <X size={18} />
@@ -90,37 +143,147 @@ export const SalaryQuickModal: React.FC<SalaryQuickModalProps> = ({
             />
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1.1fr 1fr', gap: '12px' }}>
+          {/* Active Currencies Manager */}
+          <div
+            style={{
+              padding: '12px 14px',
+              background: 'rgba(8, 12, 23, 0.78)',
+              borderRadius: '10px',
+              border: '1px solid var(--border-subtle)',
+            }}
+          >
+            <label className="field-label" style={{ marginBottom: '8px' }}>
+              Monedas habilitadas en tu barra superior (puedes llevar varias en paralelo)
+            </label>
+            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '10px' }}>
+              {Array.from(new Set([...quickCubanCodes, ...enabledCurrencies])).map((code) => {
+                const active = enabledCurrencies.includes(code);
+                const opt = findCurrencyOption(code);
+                return (
+                  <button
+                    key={code}
+                    type="button"
+                    className={`btn btn-sm ${active ? 'btn-cyan' : 'btn-ghost'}`}
+                    onClick={() => toggleCurrencyEnabled(code)}
+                  >
+                    {active ? '✓ ' : '+ '}
+                    {opt.shortTag}
+                  </button>
+                );
+              })}
+            </div>
+
+            {otherOptions.length > 0 && (
+              <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                <select
+                  className="neon-select"
+                  style={{ fontSize: '0.8rem', padding: '6px 10px' }}
+                  value={extraCurrencyToAdd}
+                  onChange={(e) => setExtraCurrencyToAdd(e.target.value)}
+                >
+                  {otherOptions.map((o) => (
+                    <option key={o.code} value={o.code}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  className="btn btn-sm btn-ghost"
+                  onClick={() => {
+                    if (extraCurrencyToAdd && !enabledCurrencies.includes(extraCurrencyToAdd)) {
+                      setEnabledCurrencies((prev) => [...prev, extraCurrencyToAdd]);
+                    }
+                  }}
+                >
+                  <Plus size={14} /> Agregar otra moneda
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Select which currency's salary we are setting right now */}
+          <div>
+            <label className="field-label">Configurar salario de la moneda:</label>
+            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+              {enabledCurrencies.map((code) => {
+                const opt = findCurrencyOption(code);
+                return (
+                  <button
+                    key={code}
+                    type="button"
+                    className={`btn btn-sm ${selectedCode === code ? 'btn-emerald' : 'btn-ghost'}`}
+                    onClick={() => handleSwitchConfigCurrency(code)}
+                  >
+                    {opt.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Parallel Salary Split: Efectivo + Transferencia */}
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: '1fr 1fr',
+              gap: '12px',
+              padding: '12px 14px',
+              borderRadius: '10px',
+              background: 'rgba(0, 240, 255, 0.04)',
+              border: '1px solid rgba(0, 240, 255, 0.25)',
+            }}
+          >
             <div>
-              <label className="field-label">
-                Salario Mensual Actual ({selectedCurrency.symbol})
+              <label className="field-label" style={{ color: 'var(--neon-emerald)' }}>
+                <Banknote size={13} style={{ verticalAlign: 'middle', marginRight: '4px' }} />
+                Salario en Efectivo ({selectedOpt.symbol})
               </label>
               <input
                 type="number"
                 step="0.01"
                 min="0"
-                required
                 autoFocus
                 className="neon-input mono-input"
-                placeholder="Ej. 2000.00"
-                value={salaryStr}
-                onChange={(e) => setSalaryStr(e.target.value)}
+                placeholder="0.00"
+                value={salEfStr}
+                onChange={(e) => setSalEfStr(e.target.value)}
               />
             </div>
 
             <div>
-              <label className="field-label">Moneda</label>
-              <select
-                className="neon-select"
-                value={currencyCode}
-                onChange={(e) => setCurrencyCode(e.target.value)}
-              >
-                {CURRENCY_OPTIONS.map((opt) => (
-                  <option key={opt.code} value={opt.code}>
-                    {opt.label}
-                  </option>
-                ))}
-              </select>
+              <label className="field-label" style={{ color: 'var(--neon-violet)' }}>
+                <Smartphone size={13} style={{ verticalAlign: 'middle', marginRight: '4px' }} />
+                Salario por Transferencia ({selectedOpt.symbol})
+              </label>
+              <input
+                type="number"
+                step="0.01"
+                min="0"
+                className="neon-input mono-input"
+                placeholder="0.00"
+                value={salTrStr}
+                onChange={(e) => setSalTrStr(e.target.value)}
+              />
+            </div>
+
+            <div
+              style={{
+                gridColumn: '1 / -1',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                paddingTop: '6px',
+                borderTop: '1px dashed var(--border-subtle)',
+                fontSize: '0.85rem',
+              }}
+            >
+              <span style={{ color: 'var(--text-secondary)' }}>
+                Salario Total Mensual ({selectedOpt.code}):
+              </span>
+              <strong className="mono text-cyan" style={{ fontSize: '1.08rem' }}>
+                {formatMoney(totalSalary, selectedOpt.symbol)}
+              </strong>
             </div>
           </div>
 
@@ -142,7 +305,7 @@ export const SalaryQuickModal: React.FC<SalaryQuickModalProps> = ({
               <div className={`switch-track ${hasManutenciones ? 'on' : ''}`}>
                 <div className="switch-thumb" />
               </div>
-              <span>¿Tienes pagos de manutención actualmente?</span>
+              <span>¿Tienes pagos de manutención en {selectedOpt.code}?</span>
             </div>
 
             <div
@@ -152,16 +315,16 @@ export const SalaryQuickModal: React.FC<SalaryQuickModalProps> = ({
               <div className={`switch-track ${applyToCurrentMonth ? 'on' : ''}`}>
                 <div className="switch-thumb" />
               </div>
-              <span>Aplicar este salario a {monthLabel}</span>
+              <span>Aplicar este salario de {selectedOpt.code} a {monthLabel}</span>
             </div>
           </div>
 
-          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '6px' }}>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '4px' }}>
             <button type="button" className="btn btn-ghost" onClick={onClose}>
               Cancelar
             </button>
             <button type="submit" className="btn btn-cyan" disabled={saving}>
-              {saving ? 'Guardando...' : 'Guardar Salario'}
+              {saving ? 'Guardando...' : `Guardar (${selectedOpt.code})`}
             </button>
           </div>
         </form>
