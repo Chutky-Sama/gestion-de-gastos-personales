@@ -261,10 +261,12 @@ textarea {
   border-radius: 6px;
   font-weight: 700;
   font-size: 0.86rem;
-  min-width: 168px;
+  width: 186px;
+  min-width: 186px;
+  max-width: 186px;
   display: inline-flex;
   align-items: center;
-  justify-content: center;
+  justify-content: space-between;
   gap: 6px;
   cursor: pointer;
   white-space: nowrap;
@@ -277,6 +279,8 @@ textarea {
 }
 
 .month-trigger-text {
+  flex: 1;
+  text-align: center;
   overflow: hidden;
   text-overflow: ellipsis;
 }
@@ -1390,35 +1394,99 @@ textarea {
   color: var(--neon-cyan);
 }
 
-/* Extended Calendar Styles */
+/* Extended Calendar Styles — Fixed 6×7 Size Across All Months */
+.calendar-modal-panel {
+  width: 680px;
+  max-width: calc(100vw - 28px);
+}
+
+.calendar-modal-body {
+  height: 492px;
+  display: flex;
+  flex-direction: column;
+}
+
+.calendar-daily-view,
+.calendar-months-view {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+.calendar-daily-toolbar {
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.calendar-month-pill-btn {
+  width: 186px;
+  min-width: 186px;
+  max-width: 186px;
+  justify-content: space-between;
+  white-space: nowrap;
+}
+
+.calendar-month-pill-btn > span:first-child {
+  flex: 1;
+  text-align: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.calendar-year-bar {
+  height: 46px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 14px;
+  border-radius: 10px;
+  background: rgba(8, 12, 23, 0.85);
+  border: 1px solid var(--border-subtle);
+  flex-shrink: 0;
+}
+
 .calendar-weekdays-row {
   display: grid;
-  grid-template-columns: repeat(7, 1fr);
+  grid-template-columns: repeat(7, minmax(0, 1fr));
   gap: 6px;
+  height: 22px;
+  align-items: center;
   margin-bottom: 6px;
 }
 
 .calendar-weekday-cell {
   text-align: center;
-  font-size: 0.73rem;
+  font-size: 0.72rem;
   font-weight: 700;
   color: var(--text-muted);
   text-transform: uppercase;
-  padding: 4px 0;
+  line-height: 1;
 }
 
 .calendar-days-grid {
   display: grid;
-  grid-template-columns: repeat(7, 1fr);
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  grid-template-rows: repeat(6, 58px);
   gap: 6px;
+  height: 378px;
 }
 
 .calendar-day-cell {
-  min-height: 62px;
+  height: 58px;
+  min-height: 58px;
+  max-height: 58px;
+  min-width: 0;
+  overflow: hidden;
+  box-sizing: border-box;
   border-radius: 9px;
   background: rgba(8, 12, 23, 0.76);
   border: 1px solid var(--border-subtle);
-  padding: 6px 7px;
+  padding: 5px 7px;
   display: flex;
   flex-direction: column;
   justify-content: space-between;
@@ -1429,8 +1497,8 @@ textarea {
 }
 
 .calendar-day-cell.empty {
-  background: transparent;
-  border-color: transparent;
+  background: rgba(8, 12, 23, 0.24);
+  border: 1px dashed rgba(110, 145, 205, 0.08);
   cursor: default;
 }
 
@@ -1453,16 +1521,17 @@ textarea {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  line-height: 1.1;
 }
 
 .calendar-day-num {
   font-weight: 700;
-  font-size: 0.82rem;
+  font-size: 0.8rem;
   color: var(--text-primary);
 }
 
 .calendar-day-count {
-  font-size: 0.64rem;
+  font-size: 0.62rem;
   padding: 1px 5px;
   border-radius: 999px;
   background: rgba(0, 240, 255, 0.16);
@@ -1471,9 +1540,12 @@ textarea {
 }
 
 .calendar-day-amounts {
-  font-size: 0.65rem;
-  line-height: 1.2;
-  margin-top: 4px;
+  font-size: 0.63rem;
+  line-height: 1.18;
+  min-height: 24px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
 }
 
 .cal-inc {
@@ -1491,19 +1563,23 @@ textarea {
 }
 
 .calendar-months-grid {
+  flex: 1;
+  margin: 12px 0;
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-rows: repeat(3, minmax(0, 1fr));
   gap: 10px;
 }
 
 .calendar-month-card {
-  padding: 14px 10px;
+  padding: 10px 8px;
   border-radius: 10px;
   background: rgba(8, 12, 23, 0.8);
   border: 1px solid var(--border-subtle);
   display: flex;
   flex-direction: column;
   align-items: center;
+  justify-content: center;
   cursor: pointer;
   transition: all 0.16s;
 }
@@ -1521,6 +1597,23 @@ textarea {
 
 .calendar-month-card.today-month {
   border-color: rgba(0, 255, 157, 0.45);
+}
+
+.calendar-footer-bar {
+  height: 32px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.77rem;
+  color: var(--text-secondary);
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.calendar-footer-bar > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* Visual Reports & Charts */
@@ -1660,6 +1753,7 @@ textarea {
     grid-template-columns: repeat(2, 1fr);
   }
   .calendar-months-grid {
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-rows: repeat(4, minmax(0, 1fr));
   }
 }

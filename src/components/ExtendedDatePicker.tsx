@@ -43,6 +43,8 @@ const MONTH_SHORT_NAMES = [
 
 const WEEKDAY_LABELS = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
 
+const FIXED_CALENDAR_CELL_COUNT = 42; // 6 filas × 7 columnas fijas para todos los meses
+
 export const ExtendedDatePicker: React.FC<ExtendedDatePickerProps> = ({
   activeMonthKey,
   selectedDayFilter,
@@ -89,7 +91,7 @@ export const ExtendedDatePicker: React.FC<ExtendedDatePickerProps> = ({
     return map;
   }, [monthRecord]);
 
-  // Build Monday-first calendar cells for activeYear / activeMonthNum
+  // Build Monday-first fixed 6×7 (42-cell) matrix so calendar height/width never shifts across months
   const calendarCells = useMemo(() => {
     const firstDate = new Date(activeYear, activeMonthNum - 1, 1);
     const daysInMonth = new Date(activeYear, activeMonthNum, 0).getDate();
@@ -106,6 +108,9 @@ export const ExtendedDatePicker: React.FC<ExtendedDatePickerProps> = ({
         '0'
       )}`;
       cells.push({ day: d, dateStr: ds });
+    }
+    while (cells.length < FIXED_CALENDAR_CELL_COUNT) {
+      cells.push({ day: null, dateStr: null });
     }
     return cells;
   }, [activeYear, activeMonthNum]);
@@ -139,9 +144,9 @@ export const ExtendedDatePicker: React.FC<ExtendedDatePickerProps> = ({
           title="Desplegar calendario completo y selector rápido de meses/años"
           onClick={openPicker}
         >
-          <Calendar size={14} className="text-cyan" />
+          <Calendar size={14} className="text-cyan" style={{ flexShrink: 0 }} />
           <span className="month-trigger-text">{compactButtonLabel}</span>
-          <ChevronDown size={14} style={{ opacity: 0.75 }} />
+          <ChevronDown size={14} style={{ opacity: 0.75, flexShrink: 0 }} />
         </button>
 
         <button
@@ -170,15 +175,11 @@ export const ExtendedDatePicker: React.FC<ExtendedDatePickerProps> = ({
 
       {isOpen && (
         <div className="modal-backdrop">
-          <div
-            className="modal-panel"
-            style={{ maxWidth: '680px', width: '95%' }}
-          >
-            <div className="modal-header">
+          <div className="modal-panel calendar-modal-panel">
+            <div className="modal-header" style={{ marginBottom: '12px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
                 <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <Calendar size={19} className="text-cyan" /> Calendario y Navegador de Fechas (
-                  {workspace.currencyCode})
+                  <Calendar size={19} className="text-cyan" /> Calendario ({workspace.currencyCode})
                 </h3>
                 <div className="type-switch">
                   <button
@@ -208,251 +209,240 @@ export const ExtendedDatePicker: React.FC<ExtendedDatePickerProps> = ({
               </button>
             </div>
 
-            {viewMode === 'months' ? (
-              <div>
-                {/* Year Stepper */}
-                <div
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    padding: '10px 14px',
-                    borderRadius: '10px',
-                    background: 'rgba(8, 12, 23, 0.85)',
-                    border: '1px solid var(--border-subtle)',
-                    marginBottom: '14px',
-                  }}
-                >
-                  <button
-                    type="button"
-                    className="btn btn-sm btn-ghost"
-                    onClick={() => setPickerYear((y) => y - 1)}
-                  >
-                    <ChevronLeft size={15} /> {pickerYear - 1}
-                  </button>
-                  <div className="mono text-cyan" style={{ fontSize: '1.25rem', fontWeight: 700 }}>
-                    Año {pickerYear}
+            <div className="calendar-modal-body">
+              {viewMode === 'months' ? (
+                <div className="calendar-months-view">
+                  {/* Year Stepper */}
+                  <div className="calendar-year-bar">
+                    <button
+                      type="button"
+                      className="btn btn-sm btn-ghost"
+                      onClick={() => setPickerYear((y) => y - 1)}
+                    >
+                      <ChevronLeft size={15} /> {pickerYear - 1}
+                    </button>
+                    <div className="mono text-cyan" style={{ fontSize: '1.2rem', fontWeight: 700 }}>
+                      Año {pickerYear}
+                    </div>
+                    <button
+                      type="button"
+                      className="btn btn-sm btn-ghost"
+                      onClick={() => setPickerYear((y) => y + 1)}
+                    >
+                      {pickerYear + 1} <ChevronRight size={15} />
+                    </button>
                   </div>
-                  <button
-                    type="button"
-                    className="btn btn-sm btn-ghost"
-                    onClick={() => setPickerYear((y) => y + 1)}
-                  >
-                    {pickerYear + 1} <ChevronRight size={15} />
-                  </button>
+
+                  {/* 12 Months Fixed Grid */}
+                  <div className="calendar-months-grid">
+                    {MONTH_SHORT_NAMES.map((mName, idx) => {
+                      const mNum = idx + 1;
+                      const mk = `${pickerYear}-${String(mNum).padStart(2, '0')}`;
+                      const rec = workspace.months[mk];
+                      const count = rec ? rec.entries.length : 0;
+                      const hasData = Boolean(
+                        rec && (rec.entries.length > 0 || (rec.salary || 0) > 0)
+                      );
+                      const isSelected = mk === activeMonthKey;
+                      const isCurrentRealMonth = mk === currentMk;
+
+                      return (
+                        <button
+                          key={mk}
+                          type="button"
+                          className={`calendar-month-card ${isSelected ? 'selected' : ''} ${
+                            isCurrentRealMonth ? 'today-month' : ''
+                          }`}
+                          onClick={() => {
+                            onSelectDayFilter(null);
+                            onSelectMonth(mk);
+                            setViewMode('calendar');
+                          }}
+                        >
+                          <div style={{ fontWeight: 700, fontSize: '0.98rem' }}>{mName}</div>
+                          <div style={{ fontSize: '0.73rem', color: 'var(--text-muted)' }}>
+                            {pickerYear}
+                          </div>
+                          {hasData ? (
+                            <span
+                              className="div-badge div-emerald"
+                              style={{ marginTop: '6px', fontSize: '0.68rem', padding: '2px 7px' }}
+                            >
+                              {count} mov.
+                            </span>
+                          ) : (
+                            <span
+                              style={{
+                                marginTop: '6px',
+                                fontSize: '0.68rem',
+                                color: 'var(--text-muted)',
+                              }}
+                            >
+                              Vacío
+                            </span>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  <div className="calendar-footer-bar">
+                    <span>
+                      Selecciona cualquier mes para abrir su cuadrícula diaria o cambia de año arriba.
+                    </span>
+                    <button
+                      type="button"
+                      className="btn btn-sm btn-ghost"
+                      onClick={() => setIsOpen(false)}
+                    >
+                      Cerrar
+                    </button>
+                  </div>
                 </div>
-
-                {/* 12 Months Grid */}
-                <div className="calendar-months-grid">
-                  {MONTH_SHORT_NAMES.map((mName, idx) => {
-                    const mNum = idx + 1;
-                    const mk = `${pickerYear}-${String(mNum).padStart(2, '0')}`;
-                    const rec = workspace.months[mk];
-                    const count = rec ? rec.entries.length : 0;
-                    const hasData = Boolean(
-                      rec && (rec.entries.length > 0 || (rec.salary || 0) > 0)
-                    );
-                    const isSelected = mk === activeMonthKey;
-                    const isCurrentRealMonth = mk === currentMk;
-
-                    return (
+              ) : (
+                <div className="calendar-daily-view">
+                  {/* Quick Month Header inside Daily Calendar View */}
+                  <div className="calendar-daily-toolbar">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                       <button
-                        key={mk}
                         type="button"
-                        className={`calendar-month-card ${isSelected ? 'selected' : ''} ${
-                          isCurrentRealMonth ? 'today-month' : ''
-                        }`}
+                        className="btn btn-sm btn-ghost"
                         onClick={() => {
                           onSelectDayFilter(null);
-                          onSelectMonth(mk);
-                          setViewMode('calendar');
+                          onSelectMonth(shiftMonthKey(activeMonthKey, -1));
                         }}
+                        title="Mes anterior"
                       >
-                        <div style={{ fontWeight: 700, fontSize: '0.95rem' }}>{mName}</div>
-                        <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
-                          {pickerYear}
-                        </div>
-                        {hasData ? (
-                          <span
-                            className="div-badge div-emerald"
-                            style={{ marginTop: '6px', fontSize: '0.68rem', padding: '2px 6px' }}
-                          >
-                            {count} mov.
-                          </span>
-                        ) : (
-                          <span
-                            style={{
-                              marginTop: '6px',
-                              fontSize: '0.68rem',
-                              color: 'var(--text-muted)',
-                            }}
-                          >
-                            Vacío
-                          </span>
-                        )}
+                        <ChevronLeft size={15} />
                       </button>
-                    );
-                  })}
-                </div>
-              </div>
-            ) : (
-              <div>
-                {/* Quick Month Header inside Daily Calendar View */}
-                <div
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    gap: '10px',
-                    marginBottom: '12px',
-                    flexWrap: 'wrap',
-                  }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <button
-                      type="button"
-                      className="btn btn-sm btn-ghost"
-                      onClick={() => {
-                        onSelectDayFilter(null);
-                        onSelectMonth(shiftMonthKey(activeMonthKey, -1));
-                      }}
-                    >
-                      <ChevronLeft size={15} />
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn-sm btn-cyan"
-                      onClick={() => {
-                        setPickerYear(activeYear);
-                        setViewMode('months');
-                      }}
-                      title="Clic para elegir cualquier mes o año"
-                    >
-                      {formatMonthLabel(activeMonthKey)} ▾
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn-sm btn-ghost"
-                      onClick={() => {
-                        onSelectDayFilter(null);
-                        onSelectMonth(shiftMonthKey(activeMonthKey, 1));
-                      }}
-                    >
-                      <ChevronRight size={15} />
-                    </button>
-                  </div>
-
-                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                    <button
-                      type="button"
-                      className="btn btn-sm btn-emerald"
-                      onClick={() => {
-                        onSelectMonth(currentMk);
-                        onSelectDayFilter(todayStr);
-                        setIsOpen(false);
-                      }}
-                    >
-                      <Clock size={13} /> Hoy ({todayStr.slice(8, 10)})
-                    </button>
-
-                    <button
-                      type="button"
-                      className="btn btn-sm btn-ghost"
-                      onClick={() => {
-                        onSelectDayFilter(null);
-                        setIsOpen(false);
-                      }}
-                    >
-                      Ver Mes Completo
-                    </button>
-                  </div>
-                </div>
-
-                {/* 7-Column Calendar Grid */}
-                <div className="calendar-weekdays-row">
-                  {WEEKDAY_LABELS.map((w) => (
-                    <div key={w} className="calendar-weekday-cell">
-                      {w}
-                    </div>
-                  ))}
-                </div>
-
-                <div className="calendar-days-grid">
-                  {calendarCells.map((cell, idx) => {
-                    if (!cell.day || !cell.dateStr) {
-                      return <div key={`empty-${idx}`} className="calendar-day-cell empty" />;
-                    }
-                    const st = dailyStats[cell.dateStr];
-                    const isToday = cell.dateStr === todayStr;
-                    const isPickedDay = cell.dateStr === selectedDayFilter;
-
-                    return (
                       <button
-                        key={cell.dateStr}
                         type="button"
-                        className={`calendar-day-cell ${isToday ? 'is-today' : ''} ${
-                          isPickedDay ? 'is-selected' : ''
-                        } ${st ? 'has-entries' : ''}`}
+                        className="btn btn-sm btn-cyan calendar-month-pill-btn"
                         onClick={() => {
-                          onSelectDayFilter(
-                            selectedDayFilter === cell.dateStr ? null : cell.dateStr
-                          );
+                          setPickerYear(activeYear);
+                          setViewMode('months');
+                        }}
+                        title="Clic para elegir cualquier mes o año"
+                      >
+                        <span>{formatMonthLabel(activeMonthKey)}</span>
+                        <span style={{ opacity: 0.8 }}>▾</span>
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-sm btn-ghost"
+                        onClick={() => {
+                          onSelectDayFilter(null);
+                          onSelectMonth(shiftMonthKey(activeMonthKey, 1));
+                        }}
+                        title="Mes siguiente"
+                      >
+                        <ChevronRight size={15} />
+                      </button>
+                    </div>
+
+                    <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                      <button
+                        type="button"
+                        className="btn btn-sm btn-emerald"
+                        onClick={() => {
+                          onSelectMonth(currentMk);
+                          onSelectDayFilter(todayStr);
                           setIsOpen(false);
                         }}
-                        title={
-                          st
-                            ? `${cell.dateStr}: ${st.count} movimiento(s) · Clic para filtrar/anotar en este día`
-                            : `${cell.dateStr}: Sin movimientos · Clic para situarte en este día`
-                        }
                       >
-                        <div className="calendar-day-top">
-                          <span className="calendar-day-num">{cell.day}</span>
-                          {st && <span className="calendar-day-count">{st.count}</span>}
-                        </div>
-
-                        <div className="calendar-day-amounts mono">
-                          {st && st.income > 0 && (
-                            <div className="cal-inc">
-                              +{formatMoney(st.income, workspace.currencySymbol)}
-                            </div>
-                          )}
-                          {st && st.expense > 0 && (
-                            <div className="cal-exp">
-                              -{formatMoney(st.expense, workspace.currencySymbol)}
-                            </div>
-                          )}
-                        </div>
+                        <Clock size={13} /> Hoy ({todayStr.slice(8, 10)})
                       </button>
-                    );
-                  })}
-                </div>
 
-                <div
-                  style={{
-                    marginTop: '12px',
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                    fontSize: '0.78rem',
-                    color: 'var(--text-secondary)',
-                    flexWrap: 'wrap',
-                    gap: '8px',
-                  }}
-                >
-                  <span>
-                    Toca cualquier día para filtrar sus movimientos y fijar esa fecha en el
-                    registrador, o cambia a <strong>12 Meses / Años</strong> para saltar lejos.
-                  </span>
-                  <button
-                    type="button"
-                    className="btn btn-sm btn-ghost"
-                    onClick={() => setIsOpen(false)}
-                  >
-                    Cerrar
-                  </button>
+                      <button
+                        type="button"
+                        className="btn btn-sm btn-ghost"
+                        onClick={() => {
+                          onSelectDayFilter(null);
+                          setIsOpen(false);
+                        }}
+                      >
+                        Ver Mes Completo
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* 7-Column Weekday Header + Fixed 6×7 (42-Cell) Grid */}
+                  <div>
+                    <div className="calendar-weekdays-row">
+                      {WEEKDAY_LABELS.map((w) => (
+                        <div key={w} className="calendar-weekday-cell">
+                          {w}
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="calendar-days-grid">
+                      {calendarCells.map((cell, idx) => {
+                        if (!cell.day || !cell.dateStr) {
+                          return <div key={`empty-${idx}`} className="calendar-day-cell empty" />;
+                        }
+                        const st = dailyStats[cell.dateStr];
+                        const isToday = cell.dateStr === todayStr;
+                        const isPickedDay = cell.dateStr === selectedDayFilter;
+
+                        return (
+                          <button
+                            key={cell.dateStr}
+                            type="button"
+                            className={`calendar-day-cell ${isToday ? 'is-today' : ''} ${
+                              isPickedDay ? 'is-selected' : ''
+                            } ${st ? 'has-entries' : ''}`}
+                            onClick={() => {
+                              onSelectDayFilter(
+                                selectedDayFilter === cell.dateStr ? null : cell.dateStr
+                              );
+                              setIsOpen(false);
+                            }}
+                            title={
+                              st
+                                ? `${cell.dateStr}: ${st.count} movimiento(s) · Clic para filtrar/anotar en este día`
+                                : `${cell.dateStr}: Sin movimientos · Clic para situarte en este día`
+                            }
+                          >
+                            <div className="calendar-day-top">
+                              <span className="calendar-day-num">{cell.day}</span>
+                              {st && <span className="calendar-day-count">{st.count}</span>}
+                            </div>
+
+                            <div className="calendar-day-amounts mono">
+                              {st && st.income > 0 && (
+                                <div className="cal-inc">
+                                  +{formatMoney(st.income, workspace.currencySymbol)}
+                                </div>
+                              )}
+                              {st && st.expense > 0 && (
+                                <div className="cal-exp">
+                                  -{formatMoney(st.expense, workspace.currencySymbol)}
+                                </div>
+                              )}
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  <div className="calendar-footer-bar">
+                    <span>
+                      Toca un día para filtrar/anotar en esa fecha, o usa{' '}
+                      <strong>12 Meses / Años</strong> para saltar rápido.
+                    </span>
+                    <button
+                      type="button"
+                      className="btn btn-sm btn-ghost"
+                      onClick={() => setIsOpen(false)}
+                    >
+                      Cerrar
+                    </button>
+                  </div>
                 </div>
-              </div>
-            )}
+              )}
+            </div>
           </div>
         </div>
       )}
