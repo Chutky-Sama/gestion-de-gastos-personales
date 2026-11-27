@@ -6,8 +6,11 @@ import {
   ArrowUpRight,
   Banknote,
   BookOpen,
+  Calendar,
   Check,
   Edit3,
+  Grid,
+  Percent,
   Plus,
   Search,
   SlidersHorizontal,
@@ -19,7 +22,13 @@ import {
 import {
   MonthComputedSummary,
   getTodayDateString,
+  round2,
 } from '../../shared/calculations';
+import {
+  HogarCategoryDef,
+  findHogarCategory,
+  getAllHogarCategories,
+} from '../../shared/hogarCategories';
 import {
   EntryType,
   InvestmentDefinition,
@@ -36,11 +45,15 @@ import {
   getDivisionColorClass,
   getDivisionLabel,
 } from '../utils/format';
+import { HogarCategoryIcon } from './HogarCategoryIcon';
 
 interface LedgerTabProps {
   month: MonthRecord;
   summary: MonthComputedSummary;
   investments: InvestmentDefinition[];
+  customHogarCategories: HogarCategoryDef[];
+  selectedDayFilter: string | null;
+  onClearDayFilter: () => void;
   currencySymbol: string;
   currencyCode: string;
   onAddEntry: (payload: {
@@ -50,8 +63,10 @@ interface LedgerTabProps {
     paymentMethod: PaymentMethod;
     transferDirection?: TransferDirection;
     transferFee?: number;
+    transferFeePercent?: number;
     concept: string;
     division: string;
+    hogarCategoryId?: string;
     investmentId?: string;
     pillar: KakeiboPillar;
     note?: string;
@@ -65,8 +80,10 @@ interface LedgerTabProps {
       paymentMethod?: PaymentMethod;
       transferDirection?: TransferDirection;
       transferFee?: number;
+      transferFeePercent?: number;
       concept?: string;
       division?: string;
+      hogarCategoryId?: string;
       investmentId?: string;
       pillar?: KakeiboPillar;
       note?: string;
@@ -75,13 +92,16 @@ interface LedgerTabProps {
   onDeleteEntry: (entryId: string) => Promise<void>;
   onSaveReflection: (reflection: MonthRecord['reflection']) => Promise<void>;
   onOpenAdjustModal: () => void;
-  onNavigateTab: (tab: 'envelopes' | 'investments') => void;
+  onNavigateTab: (tab: 'envelopes' | 'investments' | 'reports') => void;
 }
 
 export const LedgerTab: React.FC<LedgerTabProps> = ({
   month,
   summary,
   investments,
+  customHogarCategories,
+  selectedDayFilter,
+  onClearDayFilter,
   currencySymbol,
   currencyCode,
   onAddEntry,
@@ -91,21 +111,34 @@ export const LedgerTab: React.FC<LedgerTabProps> = ({
   onOpenAdjustModal,
   onNavigateTab,
 }) => {
+  const allHogarCategories = useMemo(
+    () => getAllHogarCategories(customHogarCategories),
+    [customHogarCategories]
+  );
+
   const defaultDateForMonth = useMemo(() => {
+    if (selectedDayFilter && selectedDayFilter.startsWith(month.monthKey)) {
+      return selectedDayFilter;
+    }
     const today = getTodayDateString();
     if (today.startsWith(month.monthKey)) return today;
     return `${month.monthKey}-01`;
-  }, [month.monthKey]);
+  }, [month.monthKey, selectedDayFilter]);
 
   const [entryMode, setEntryMode] = useState<'expense' | 'income' | 'channel_transfer'>('expense');
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('efectivo');
   const [transferDirection, setTransferDirection] =
     useState<TransferDirection>('transf_to_cash');
+
+  // Improvement #1: Commission % vs Fixed Amount ($)
+  const [feeInputMode, setFeeInputMode] = useState<'percent' | 'fixed'>('percent');
   const [transferFeeStr, setTransferFeeStr] = useState('');
 
   const [concept, setConcept] = useState('');
   const [amountStr, setAmountStr] = useState('');
   const [division, setDivision] = useState<string>('hogar');
+  const [hogarCategoryId, setHogarCategoryId] = useState<string>('alimentos');
+  const [showHogarGrid, setShowHogarGrid] = useState<boolean>(true);
   const [investmentId, setInvestmentId] = useState<string>('');
   const [pillar, setPillar] = useState<KakeiboPillar>('supervivencia');
   const [date, setDate] = useState<string>(defaultDateForMonth);
@@ -118,12 +151,18 @@ export const LedgerTab: React.FC<LedgerTabProps> = ({
   const [filterChannel, setFilterChannel] = useState<'all' | 'efectivo' | 'transferencia'>('all');
   const [orderAsc, setOrderAsc] = useState(true);
 
+  // Edit Modal State
   const [editingEntry, setEditingEntry] = useState<LedgerEntry | null>(null);
   const [editConcept, setEditConcept] = useState('');
   const [editAmountStr, setEditAmountStr] = useState('');
   const [editPaymentMethod, setEditPaymentMethod] = useState<PaymentMethod>('efectivo');
+  const [editTransferDirection, setEditTransferDirection] =
+    useState<TransferDirection>('transf_to_cash');
+  const [editFeeMode, setEditFeeMode] = useState<'percent' | 'fixed'>('percent');
+  const [editFeeStr, setEditFeeStr] = useState('');
   const [editDate, setEditDate] = useState('');
   const [editDivision, setEditDivision] = useState('');
+  const [editHogarCategoryId, setEditHogarCategoryId] = useState('');
   const [editInvestmentId, setEditInvestmentId] = useState('');
   const [editPillar, setEditPillar] = useState<KakeiboPillar>('supervivencia');
   const [editNote, setEditNote] = useState('');
@@ -178,16 +217,43 @@ export const LedgerTab: React.FC<LedgerTabProps> = ({
     }
   };
 
+  const handleSelectHogarCatInComposer = (cat: HogarCategoryDef) => {
+    const prevCat = findHogarCategory(hogarCategoryId, customHogarCategories);
+    setHogarCategoryId(cat.id);
+    if (!concept.trim() || (prevCat && concept.trim() === prevCat.name)) {
+      setConcept(cat.name);
+    }
+  };
+
+  // Live calculation for channel_transfer with % or fixed commission
+  const transferCalc = useMemo(() => {
+    const amt = Math.max(0, parseFloat(amountStr) || 0);
+    const rawFee = Math.max(0, parseFloat(transferFeeStr) || 0);
+    const feeAmt =
+      feeInputMode === 'percent' ? round2((amt * rawFee) / 100) : round2(rawFee);
+    const feePct =
+      feeInputMode === 'percent'
+        ? round2(rawFee)
+        : amt > 0
+        ? round2((feeAmt / amt) * 100)
+        : 0;
+    const netReceived = round2(Math.max(0, amt - feeAmt));
+    return { amt, feeAmt, feePct, netReceived };
+  }, [amountStr, transferFeeStr, feeInputMode]);
+
   const handleSubmitEntry = async (e: React.FormEvent) => {
     e.preventDefault();
     const numeric = parseFloat(amountStr);
     if (Number.isNaN(numeric) || numeric <= 0) return;
 
+    const selectedCat = findHogarCategory(hogarCategoryId, customHogarCategories);
     const defaultConcept =
       entryMode === 'channel_transfer'
         ? transferDirection === 'transf_to_cash'
           ? 'Extracción / Cambio de Transferencia a Efectivo'
           : 'Depósito / Paso de Efectivo a Transferencia'
+        : entryMode === 'expense' && division === 'hogar' && selectedCat
+        ? selectedCat.name
         : '';
 
     const finalConcept = concept.trim() || defaultConcept;
@@ -201,9 +267,10 @@ export const LedgerTab: React.FC<LedgerTabProps> = ({
         amount: numeric,
         paymentMethod,
         transferDirection: entryMode === 'channel_transfer' ? transferDirection : undefined,
-        transferFee:
-          entryMode === 'channel_transfer'
-            ? Math.max(0, parseFloat(transferFeeStr) || 0)
+        transferFee: entryMode === 'channel_transfer' ? transferCalc.feeAmt : undefined,
+        transferFeePercent:
+          entryMode === 'channel_transfer' && transferCalc.feePct > 0
+            ? transferCalc.feePct
             : undefined,
         concept: finalConcept,
         division:
@@ -212,6 +279,8 @@ export const LedgerTab: React.FC<LedgerTabProps> = ({
             : entryMode === 'channel_transfer'
             ? 'bolsillo'
             : division,
+        hogarCategoryId:
+          entryMode === 'expense' && division === 'hogar' ? hogarCategoryId : undefined,
         investmentId:
           entryMode === 'expense' && division === 'inversiones'
             ? investmentId || undefined
@@ -238,8 +307,20 @@ export const LedgerTab: React.FC<LedgerTabProps> = ({
     setEditConcept(entry.concept);
     setEditAmountStr(String(entry.amount));
     setEditPaymentMethod(entry.paymentMethod || 'efectivo');
+    setEditTransferDirection(entry.transferDirection || 'transf_to_cash');
+    if (entry.transferFeePercent && entry.transferFeePercent > 0) {
+      setEditFeeMode('percent');
+      setEditFeeStr(String(entry.transferFeePercent));
+    } else if (entry.transferFee && entry.transferFee > 0) {
+      setEditFeeMode('fixed');
+      setEditFeeStr(String(entry.transferFee));
+    } else {
+      setEditFeeMode('percent');
+      setEditFeeStr('');
+    }
     setEditDate(entry.date);
     setEditDivision(entry.division);
+    setEditHogarCategoryId(entry.hogarCategoryId || '');
     setEditInvestmentId(entry.investmentId || '');
     setEditPillar(entry.pillar);
     setEditNote(entry.note || '');
@@ -251,12 +332,31 @@ export const LedgerTab: React.FC<LedgerTabProps> = ({
     const numeric = parseFloat(editAmountStr);
     if (Number.isNaN(numeric) || numeric <= 0) return;
 
+    let nextFeeAmt: number | undefined;
+    let nextFeePct: number | undefined;
+    if (editingEntry.type === 'channel_transfer') {
+      const rawFee = Math.max(0, parseFloat(editFeeStr) || 0);
+      nextFeeAmt =
+        editFeeMode === 'percent' ? round2((numeric * rawFee) / 100) : round2(rawFee);
+      nextFeePct =
+        editFeeMode === 'percent'
+          ? round2(rawFee)
+          : numeric > 0
+          ? round2((nextFeeAmt / numeric) * 100)
+          : 0;
+    }
+
     await onUpdateEntry(editingEntry.id, {
       concept: editConcept.trim() || editingEntry.concept,
       amount: numeric,
       paymentMethod: editPaymentMethod,
+      transferDirection:
+        editingEntry.type === 'channel_transfer' ? editTransferDirection : undefined,
+      transferFee: nextFeeAmt,
+      transferFeePercent: nextFeePct,
       date: editDate,
       division: editDivision,
+      hogarCategoryId: editDivision === 'hogar' ? editHogarCategoryId || undefined : undefined,
       investmentId: editDivision === 'inversiones' ? editInvestmentId || undefined : undefined,
       pillar: editPillar,
       note: editNote,
@@ -287,6 +387,7 @@ export const LedgerTab: React.FC<LedgerTabProps> = ({
   const visibleEntries = useMemo(() => {
     const base = orderAsc ? summary.ledgerAscending : summary.ledgerDescending;
     return base.filter((row) => {
+      if (selectedDayFilter && row.date !== selectedDayFilter) return false;
       if (filterDivision !== 'all' && row.division !== filterDivision) return false;
       if (filterChannel !== 'all') {
         if (row.type !== 'channel_transfer' && row.paymentMethod !== filterChannel) {
@@ -296,15 +397,26 @@ export const LedgerTab: React.FC<LedgerTabProps> = ({
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase();
         const invName = row.investmentId ? invNameMap.get(row.investmentId) || '' : '';
+        const catObj = findHogarCategory(row.hogarCategoryId, customHogarCategories);
         return (
           row.concept.toLowerCase().includes(q) ||
           (row.note || '').toLowerCase().includes(q) ||
-          invName.toLowerCase().includes(q)
+          invName.toLowerCase().includes(q) ||
+          (catObj?.name.toLowerCase().includes(q) ?? false)
         );
       }
       return true;
     });
-  }, [summary, orderAsc, filterDivision, filterChannel, searchQuery, invNameMap]);
+  }, [
+    summary,
+    orderAsc,
+    selectedDayFilter,
+    filterDivision,
+    filterChannel,
+    searchQuery,
+    invNameMap,
+    customHogarCategories,
+  ]);
 
   const activeEnvelopeList = [
     summary.envelopes.hogar,
@@ -319,6 +431,8 @@ export const LedgerTab: React.FC<LedgerTabProps> = ({
     1,
     ...summary.weeklyBreakdown.map((w) => Math.max(w.expense, w.income))
   );
+
+  const activeHogarCat = findHogarCategory(hogarCategoryId, customHogarCategories);
 
   return (
     <div>
@@ -382,7 +496,7 @@ export const LedgerTab: React.FC<LedgerTabProps> = ({
         })}
       </div>
 
-      {/* Quick Entry Composer with Parallel Efectivo / Transferencia */}
+      {/* Quick Entry Composer with Parallel Efectivo / Transferencia + % Fee + Mis Gastos Grid */}
       <div className="composer-panel">
         <div className="composer-top">
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
@@ -435,6 +549,17 @@ export const LedgerTab: React.FC<LedgerTabProps> = ({
               </div>
             )}
 
+            {entryMode === 'expense' && division === 'hogar' && (
+              <button
+                type="button"
+                className={`btn btn-sm ${showHogarGrid ? 'btn-cyan' : 'btn-ghost'}`}
+                onClick={() => setShowHogarGrid((v) => !v)}
+              >
+                <Grid size={14} />
+                {showHogarGrid ? 'Ocultar Íconos Hogar' : 'Elegir Ícono Hogar'}
+              </button>
+            )}
+
             <button
               type="button"
               className="btn btn-sm btn-ghost"
@@ -451,233 +576,384 @@ export const LedgerTab: React.FC<LedgerTabProps> = ({
 
         <form onSubmit={handleSubmitEntry}>
           {entryMode === 'channel_transfer' ? (
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: '1.6fr 1fr 1fr 1.6fr 1fr auto',
-                gap: '12px',
-                alignItems: 'end',
-              }}
-              className="composer-transfer-grid"
-            >
-              <div>
-                <label className="field-label">Dirección del cambio</label>
-                <select
-                  className="neon-select"
-                  value={transferDirection}
-                  onChange={(e) => setTransferDirection(e.target.value as TransferDirection)}
-                >
-                  <option value="transf_to_cash">
-                    Transferencia → Efectivo (Caja Extra / Cajero)
-                  </option>
-                  <option value="cash_to_transf">
-                    Efectivo → Transferencia (Depósito / Tarjeta)
-                  </option>
-                </select>
-              </div>
-
-              <div>
-                <label className="field-label">Monto a pasar ({currencySymbol})</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  min="0.01"
-                  required
-                  className="neon-input mono-input"
-                  placeholder="0.00"
-                  value={amountStr}
-                  onChange={(e) => setAmountStr(e.target.value)}
-                />
-              </div>
-
-              <div>
-                <label className="field-label">Comisión si hubo ({currencySymbol})</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  className="neon-input mono-input"
-                  placeholder="0.00"
-                  value={transferFeeStr}
-                  onChange={(e) => setTransferFeeStr(e.target.value)}
-                />
-              </div>
-
-              <div>
-                <label className="field-label">Detalle (opcional)</label>
-                <input
-                  type="text"
-                  className="neon-input"
-                  placeholder="Ej. Caja Extra bodega, cajero, cambio..."
-                  value={concept}
-                  onChange={(e) => setConcept(e.target.value)}
-                />
-              </div>
-
-              <div>
-                <label className="field-label">Fecha</label>
-                <input
-                  type="date"
-                  className="neon-input mono-input"
-                  value={date}
-                  onChange={(e) => setDate(e.target.value)}
-                />
-              </div>
-
-              <div>
-                <button
-                  type="submit"
-                  disabled={submitting}
-                  className="btn btn-cyan"
-                  style={{ height: '40px', width: '100%' }}
-                >
-                  <ArrowLeftRight size={15} /> Pasar
-                </button>
-              </div>
-            </div>
-          ) : (
-            <div className="composer-grid">
-              <div>
-                <label className="field-label">
-                  Concepto ({paymentMethod === 'efectivo' ? 'En Efectivo' : 'Por Transferencia'})
-                </label>
-                <input
-                  type="text"
-                  required
-                  className="neon-input"
-                  placeholder={
-                    entryMode === 'income'
-                      ? 'Ej. Pago recibido, bono, venta...'
-                      : paymentMethod === 'efectivo'
-                      ? 'Ej. Agro, transporte, panadería (efectivo)...'
-                      : 'Ej. Electricidad, Nauta, tienda (Transfermóvil)...'
-                  }
-                  value={concept}
-                  onChange={(e) => setConcept(e.target.value)}
-                />
-              </div>
-
-              <div>
-                <label className="field-label">
-                  Monto ({currencySymbol} {currencyCode})
-                </label>
-                <input
-                  type="number"
-                  step="0.01"
-                  min="0.01"
-                  required
-                  className="neon-input mono-input"
-                  placeholder="0.00"
-                  value={amountStr}
-                  onChange={(e) => setAmountStr(e.target.value)}
-                />
-              </div>
-
-              {entryMode === 'expense' ? (
+            <div>
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: '1.5fr 1fr 1.25fr 1.4fr 0.95fr auto',
+                  gap: '12px',
+                  alignItems: 'end',
+                }}
+                className="composer-transfer-grid"
+              >
                 <div>
-                  <label className="field-label">Parte / Sobre</label>
+                  <label className="field-label">Dirección del cambio</label>
                   <select
                     className="neon-select"
-                    value={division}
-                    onChange={(e) => handleDivisionChange(e.target.value)}
+                    value={transferDirection}
+                    onChange={(e) => setTransferDirection(e.target.value as TransferDirection)}
                   >
-                    <option value="hogar">Gastos del Hogar</option>
-                    <option value="deudas">Deudas</option>
-                    {month.hasManutenciones && (
-                      <option value="manutenciones">Manutenciones</option>
-                    )}
-                    <option value="inversiones">Inversiones</option>
-                    <option value="bolsillo">Dinero de Bolsillo</option>
-                    {month.allocations.customEnvelopes.map((ce) => (
-                      <option key={ce.id} value={ce.id}>
-                        {ce.name}
-                      </option>
-                    ))}
-                    <option value="general">Dinero General (Directo)</option>
+                    <option value="transf_to_cash">
+                      Transferencia → Efectivo (Caja Extra / Cambio)
+                    </option>
+                    <option value="cash_to_transf">
+                      Efectivo → Transferencia (Depósito / Tarjeta)
+                    </option>
                   </select>
                 </div>
-              ) : (
+
                 <div>
-                  <label className="field-label">Se suma a</label>
+                  <label className="field-label">Monto que sale ({currencySymbol})</label>
                   <input
-                    type="text"
-                    disabled
-                    className="neon-input"
-                    value={
-                      paymentMethod === 'efectivo'
-                        ? 'Saldo en Efectivo (+)'
-                        : 'Saldo en Transferencia (+)'
-                    }
+                    type="number"
+                    step="0.01"
+                    min="0.01"
+                    required
+                    className="neon-input mono-input"
+                    placeholder="0.00"
+                    value={amountStr}
+                    onChange={(e) => setAmountStr(e.target.value)}
                   />
                 </div>
-              )}
 
-              {entryMode === 'expense' && division === 'inversiones' ? (
+                {/* Improvement #1: Commission with % or $ toggle */}
                 <div>
-                  <label className="field-label">¿Cuál Inversión?</label>
-                  {investments.length > 0 ? (
+                  <div
+                    style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      marginBottom: '6px',
+                    }}
+                  >
+                    <label className="field-label" style={{ marginBottom: 0 }}>
+                      Comisión ({feeInputMode === 'percent' ? '%' : currencySymbol})
+                    </label>
+                    <div className="mini-fee-toggle">
+                      <button
+                        type="button"
+                        className={feeInputMode === 'percent' ? 'active' : ''}
+                        onClick={() => setFeeInputMode('percent')}
+                        title="Calcular comisión por porcentaje (%)"
+                      >
+                        %
+                      </button>
+                      <button
+                        type="button"
+                        className={feeInputMode === 'fixed' ? 'active' : ''}
+                        onClick={() => setFeeInputMode('fixed')}
+                        title="Ingresar comisión como monto fijo"
+                      >
+                        {currencySymbol}
+                      </button>
+                    </div>
+                  </div>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    className="neon-input mono-input"
+                    placeholder={feeInputMode === 'percent' ? 'Ej. 10 (%)' : '0.00'}
+                    value={transferFeeStr}
+                    onChange={(e) => setTransferFeeStr(e.target.value)}
+                  />
+                </div>
+
+                <div>
+                  <label className="field-label">Detalle (opcional)</label>
+                  <input
+                    type="text"
+                    className="neon-input"
+                    placeholder="Ej. Caja Extra, cambio al 10%..."
+                    value={concept}
+                    onChange={(e) => setConcept(e.target.value)}
+                  />
+                </div>
+
+                <div>
+                  <label className="field-label">Fecha</label>
+                  <input
+                    type="date"
+                    className="neon-input mono-input"
+                    value={date}
+                    onChange={(e) => setDate(e.target.value)}
+                  />
+                </div>
+
+                <div>
+                  <button
+                    type="submit"
+                    disabled={submitting}
+                    className="btn btn-cyan"
+                    style={{ height: '40px', width: '100%' }}
+                  >
+                    <ArrowLeftRight size={15} /> Pasar
+                  </button>
+                </div>
+              </div>
+
+              {/* Live % Commission Calculation Preview Bar */}
+              {transferCalc.amt > 0 && (
+                <div
+                  style={{
+                    marginTop: '10px',
+                    padding: '9px 14px',
+                    borderRadius: '9px',
+                    background: 'rgba(0, 240, 255, 0.06)',
+                    border: '1px solid rgba(0, 240, 255, 0.25)',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    flexWrap: 'wrap',
+                    gap: '12px',
+                    fontSize: '0.82rem',
+                  }}
+                >
+                  <span>
+                    Sale de{' '}
+                    <strong>
+                      {transferDirection === 'transf_to_cash' ? 'Transferencia' : 'Efectivo'}
+                    </strong>
+                    :{' '}
+                    <strong className="mono">
+                      -{formatMoney(transferCalc.amt, currencySymbol)}
+                    </strong>
+                  </span>
+                  <span>
+                    <Percent size={13} style={{ verticalAlign: 'middle', marginRight: '3px' }} />
+                    Comisión ({transferCalc.feePct}%):{' '}
+                    <strong className="mono text-magenta">
+                      -{formatMoney(transferCalc.feeAmt, currencySymbol)}
+                    </strong>
+                  </span>
+                  <span>
+                    Recibes neto en{' '}
+                    <strong>
+                      {transferDirection === 'transf_to_cash' ? 'Efectivo' : 'Transferencia'}
+                    </strong>
+                    :{' '}
+                    <strong className="mono text-emerald" style={{ fontSize: '0.95rem' }}>
+                      +{formatMoney(transferCalc.netReceived, currencySymbol)}
+                    </strong>
+                  </span>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div>
+              <div className="composer-grid">
+                <div>
+                  <label className="field-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    {entryMode === 'expense' && division === 'hogar' && activeHogarCat && (
+                      <HogarCategoryIcon
+                        iconKey={activeHogarCat.iconKey}
+                        size={14}
+                        color={activeHogarCat.color}
+                      />
+                    )}
+                    Concepto ({paymentMethod === 'efectivo' ? 'En Efectivo' : 'Por Transferencia'})
+                  </label>
+                  <input
+                    type="text"
+                    className="neon-input"
+                    placeholder={
+                      entryMode === 'income'
+                        ? 'Ej. Pago recibido, bono, venta...'
+                        : division === 'hogar' && activeHogarCat
+                        ? `${activeHogarCat.name} (o escribe detalle)...`
+                        : 'Detalle del gasto...'
+                    }
+                    required={!(entryMode === 'expense' && division === 'hogar' && activeHogarCat)}
+                    value={concept}
+                    onChange={(e) => setConcept(e.target.value)}
+                  />
+                </div>
+
+                <div>
+                  <label className="field-label">
+                    Monto ({currencySymbol} {currencyCode})
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0.01"
+                    required
+                    className="neon-input mono-input"
+                    placeholder="0.00"
+                    value={amountStr}
+                    onChange={(e) => setAmountStr(e.target.value)}
+                  />
+                </div>
+
+                {entryMode === 'expense' ? (
+                  <div>
+                    <label className="field-label">Parte / Sobre</label>
                     <select
                       className="neon-select"
-                      value={investmentId}
-                      onChange={(e) => setInvestmentId(e.target.value)}
+                      value={division}
+                      onChange={(e) => handleDivisionChange(e.target.value)}
                     >
-                      {investments.map((inv) => (
-                        <option key={inv.id} value={inv.id}>
-                          {inv.name} {!inv.active ? '(Archivada)' : ''}
+                      <option value="hogar">Gastos del Hogar</option>
+                      <option value="deudas">Deudas</option>
+                      {month.hasManutenciones && (
+                        <option value="manutenciones">Manutenciones</option>
+                      )}
+                      <option value="inversiones">Inversiones</option>
+                      <option value="bolsillo">Dinero de Bolsillo</option>
+                      {month.allocations.customEnvelopes.map((ce) => (
+                        <option key={ce.id} value={ce.id}>
+                          {ce.name}
                         </option>
                       ))}
+                      <option value="general">Dinero General (Directo)</option>
                     </select>
-                  ) : (
+                  </div>
+                ) : (
+                  <div>
+                    <label className="field-label">Se suma a</label>
+                    <input
+                      type="text"
+                      disabled
+                      className="neon-input"
+                      value={
+                        paymentMethod === 'efectivo'
+                          ? 'Saldo en Efectivo (+)'
+                          : 'Saldo en Transferencia (+)'
+                      }
+                    />
+                  </div>
+                )}
+
+                {entryMode === 'expense' && division === 'inversiones' ? (
+                  <div>
+                    <label className="field-label">¿Cuál Inversión?</label>
+                    {investments.length > 0 ? (
+                      <select
+                        className="neon-select"
+                        value={investmentId}
+                        onChange={(e) => setInvestmentId(e.target.value)}
+                      >
+                        {investments.map((inv) => (
+                          <option key={inv.id} value={inv.id}>
+                            {inv.name} {!inv.active ? '(Archivada)' : ''}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <button
+                        type="button"
+                        className="btn btn-violet"
+                        style={{ width: '100%' }}
+                        onClick={() => onNavigateTab('investments')}
+                      >
+                        + Definir Inversiones
+                      </button>
+                    )}
+                  </div>
+                ) : (
+                  <div>
+                    <label className="field-label">Pilar Kakeibo</label>
+                    <select
+                      className="neon-select"
+                      value={entryMode === 'income' ? 'ingreso' : pillar}
+                      disabled={entryMode === 'income'}
+                      onChange={(e) => setPillar(e.target.value as KakeiboPillar)}
+                    >
+                      <option value="supervivencia">必需 · Necesidad / Supervivencia</option>
+                      <option value="opcional">娯楽 · Gusto / Opcional</option>
+                      <option value="cultura">教養 · Cultura / Salud / Mejora</option>
+                      <option value="patrimonio">資産 · Patrimonio / Deuda</option>
+                      <option value="imprevisto">特別 · Extra / Imprevisto</option>
+                      {entryMode === 'income' && <option value="ingreso">収入 · Entrada</option>}
+                    </select>
+                  </div>
+                )}
+
+                <div>
+                  <label className="field-label">Fecha</label>
+                  <input
+                    type="date"
+                    className="neon-input mono-input"
+                    value={date}
+                    onChange={(e) => setDate(e.target.value)}
+                  />
+                </div>
+
+                <div>
+                  <button
+                    type="submit"
+                    disabled={submitting}
+                    className={`btn ${entryMode === 'income' ? 'btn-emerald' : 'btn-magenta'}`}
+                    style={{ height: '40px', width: '100%' }}
+                  >
+                    <Plus size={16} />
+                    {entryMode === 'income' ? 'Sumar' : 'Anotar'}
+                  </button>
+                </div>
+              </div>
+
+              {/* "MIS GASTOS" STYLE ICON SELECTOR FOR GASTOS DEL HOGAR */}
+              {entryMode === 'expense' && division === 'hogar' && showHogarGrid && (
+                <div
+                  style={{
+                    marginTop: '14px',
+                    paddingTop: '12px',
+                    borderTop: '1px solid var(--border-subtle)',
+                  }}
+                >
+                  <div
+                    style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      marginBottom: '10px',
+                    }}
+                  >
+                    <span className="field-label" style={{ marginBottom: 0 }}>
+                      Categoría de Gastos del Hogar:{' '}
+                      <strong style={{ color: activeHogarCat?.color || 'var(--neon-cyan)' }}>
+                        {activeHogarCat?.name || 'General'}
+                      </strong>
+                    </span>
                     <button
                       type="button"
-                      className="btn btn-violet"
-                      style={{ width: '100%' }}
-                      onClick={() => onNavigateTab('investments')}
+                      className="btn btn-sm btn-ghost"
+                      style={{ padding: '3px 8px', fontSize: '0.72rem' }}
+                      onClick={() => onNavigateTab('envelopes')}
                     >
-                      + Definir Inversiones
+                      + Personalizar íconos en Sobres
                     </button>
-                  )}
-                </div>
-              ) : (
-                <div>
-                  <label className="field-label">Pilar Kakeibo</label>
-                  <select
-                    className="neon-select"
-                    value={entryMode === 'income' ? 'ingreso' : pillar}
-                    disabled={entryMode === 'income'}
-                    onChange={(e) => setPillar(e.target.value as KakeiboPillar)}
-                  >
-                    <option value="supervivencia">必需 · Necesidad / Supervivencia</option>
-                    <option value="opcional">娯楽 · Gusto / Opcional</option>
-                    <option value="cultura">教養 · Cultura / Salud / Mejora</option>
-                    <option value="patrimonio">資産 · Patrimonio / Deuda</option>
-                    <option value="imprevisto">特別 · Extra / Imprevisto</option>
-                    {entryMode === 'income' && <option value="ingreso">収入 · Entrada</option>}
-                  </select>
+                  </div>
+
+                  <div className="mis-gastos-grid compact">
+                    {allHogarCategories.map((cat) => {
+                      const isSelected = hogarCategoryId === cat.id;
+                      return (
+                        <button
+                          key={cat.id}
+                          type="button"
+                          className={`mis-gastos-item ${isSelected ? 'selected' : ''}`}
+                          onClick={() => handleSelectHogarCatInComposer(cat)}
+                          style={
+                            isSelected
+                              ? ({ '--cat-accent': cat.color } as React.CSSProperties)
+                              : undefined
+                          }
+                        >
+                          <div className="mis-gastos-circle">
+                            <HogarCategoryIcon
+                              iconKey={cat.iconKey}
+                              size={18}
+                              color={isSelected ? cat.color : undefined}
+                            />
+                          </div>
+                          <span className="mis-gastos-label">{cat.name}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
               )}
-
-              <div>
-                <label className="field-label">Fecha</label>
-                <input
-                  type="date"
-                  className="neon-input mono-input"
-                  value={date}
-                  onChange={(e) => setDate(e.target.value)}
-                />
-              </div>
-
-              <div>
-                <button
-                  type="submit"
-                  disabled={submitting}
-                  className={`btn ${entryMode === 'income' ? 'btn-emerald' : 'btn-magenta'}`}
-                  style={{ height: '40px', width: '100%' }}
-                >
-                  <Plus size={16} />
-                  {entryMode === 'income' ? 'Sumar' : 'Anotar'}
-                </button>
-              </div>
             </div>
           )}
 
@@ -695,6 +971,33 @@ export const LedgerTab: React.FC<LedgerTabProps> = ({
           )}
         </form>
       </div>
+
+      {/* Selected Day Banner if Calendar Day Filter is active */}
+      {selectedDayFilter && (
+        <div
+          style={{
+            marginBottom: '14px',
+            padding: '10px 16px',
+            borderRadius: '10px',
+            background: 'rgba(0, 240, 255, 0.09)',
+            border: '1px solid rgba(0, 240, 255, 0.4)',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            gap: '10px',
+          }}
+        >
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', fontSize: '0.86rem' }}>
+            <Calendar size={16} className="text-cyan" />
+            Mostrando movimientos del día <strong>{formatShortDate(selectedDayFilter)}</strong> (
+            {visibleEntries.length} movimiento{visibleEntries.length === 1 ? '' : 's'})
+          </span>
+          <button type="button" className="btn btn-sm btn-ghost" onClick={onClearDayFilter}>
+            Ver todo el mes completo
+          </button>
+        </div>
+      )}
 
       {/* Main Parallel Running-Balance Ledger Book */}
       <div className="ledger-book">
@@ -787,7 +1090,7 @@ export const LedgerTab: React.FC<LedgerTabProps> = ({
               <tr>
                 <th>Fecha</th>
                 <th>Concepto</th>
-                <th>Sobre</th>
+                <th>Sobre / Categoría</th>
                 <th>Vía</th>
                 <th className="num-col">Monto</th>
                 <th className="num-col" style={{ color: 'var(--neon-emerald)' }}>
@@ -804,6 +1107,7 @@ export const LedgerTab: React.FC<LedgerTabProps> = ({
             </thead>
             <tbody>
               {orderAsc &&
+                !selectedDayFilter &&
                 filterDivision === 'all' &&
                 filterChannel === 'all' &&
                 !searchQuery.trim() && (
@@ -867,6 +1171,10 @@ export const LedgerTab: React.FC<LedgerTabProps> = ({
                     row.division === 'inversiones' && row.investmentId
                       ? invNameMap.get(row.investmentId)
                       : undefined;
+                  const hogarCat =
+                    row.division === 'hogar'
+                      ? findHogarCategory(row.hogarCategoryId, customHogarCategories)
+                      : undefined;
 
                   return (
                     <tr key={row.id}>
@@ -877,8 +1185,37 @@ export const LedgerTab: React.FC<LedgerTabProps> = ({
                         {formatShortDate(row.date)}
                       </td>
                       <td>
-                        <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
-                          {row.concept}
+                        <div
+                          style={{
+                            fontWeight: 600,
+                            color: 'var(--text-primary)',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '7px',
+                          }}
+                        >
+                          {hogarCat && (
+                            <span
+                              style={{
+                                width: '24px',
+                                height: '24px',
+                                borderRadius: '50%',
+                                background: 'rgba(255,255,255,0.05)',
+                                border: `1px solid ${hogarCat.color}`,
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                flexShrink: 0,
+                              }}
+                            >
+                              <HogarCategoryIcon
+                                iconKey={hogarCat.iconKey}
+                                size={13}
+                                color={hogarCat.color}
+                              />
+                            </span>
+                          )}
+                          <span>{row.concept}</span>
                         </div>
                         <div
                           style={{
@@ -893,8 +1230,13 @@ export const LedgerTab: React.FC<LedgerTabProps> = ({
                             {pillarInfo.asianTag} · {pillarInfo.label}
                           </span>
                           {isTraspaso && (row.transferFee || 0) > 0 && (
-                            <span className="pillar-badge" style={{ color: 'var(--neon-magenta)' }}>
-                              Comisión: -{formatMoney(row.transferFee || 0, currencySymbol)}
+                            <span
+                              className="pillar-badge"
+                              style={{ color: 'var(--neon-magenta)' }}
+                            >
+                              Comisión
+                              {row.transferFeePercent ? ` (${row.transferFeePercent}%)` : ''}: -
+                              {formatMoney(row.transferFee || 0, currencySymbol)}
                             </span>
                           )}
                           {row.note && (
@@ -907,6 +1249,7 @@ export const LedgerTab: React.FC<LedgerTabProps> = ({
                       <td>
                         <span className={`div-badge ${getDivisionColorClass(row.division)}`}>
                           {getDivisionLabel(row.division, month.allocations.customEnvelopes)}
+                          {hogarCat ? ` · ${hogarCat.name}` : ''}
                           {invLabel ? ` → ${invLabel}` : ''}
                         </span>
                       </td>
@@ -930,11 +1273,7 @@ export const LedgerTab: React.FC<LedgerTabProps> = ({
                       </td>
                       <td
                         className={`num-col ${
-                          isTraspaso
-                            ? 'text-cyan'
-                            : isPos
-                            ? 'text-emerald'
-                            : 'text-magenta'
+                          isTraspaso ? 'text-cyan' : isPos ? 'text-emerald' : 'text-magenta'
                         }`}
                         style={{ fontWeight: 700 }}
                       >
@@ -1002,6 +1341,13 @@ export const LedgerTab: React.FC<LedgerTabProps> = ({
             <span className="kpi-label">
               Ritmo Semanal Kakeibo ({currencyCode}) <span className="asian-chip">週間集計</span>
             </span>
+            <button
+              type="button"
+              className="btn btn-sm btn-ghost"
+              onClick={() => onNavigateTab('reports')}
+            >
+              Ver Informes y Gráficos →
+            </button>
           </div>
 
           <div className="weeks-grid">
@@ -1102,10 +1448,10 @@ export const LedgerTab: React.FC<LedgerTabProps> = ({
         </div>
       </div>
 
-      {/* Edit Entry Modal */}
+      {/* Edit Entry Modal — Improvement #2: does NOT close when clicking outside! */}
       {editingEntry && (
-        <div className="modal-backdrop" onClick={() => setEditingEntry(null)}>
-          <div className="modal-panel" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-backdrop">
+          <div className="modal-panel">
             <div className="modal-header">
               <h3>Editar Movimiento</h3>
               <button type="button" className="icon-btn" onClick={() => setEditingEntry(null)}>
@@ -1113,7 +1459,10 @@ export const LedgerTab: React.FC<LedgerTabProps> = ({
               </button>
             </div>
 
-            <form onSubmit={saveEdit} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            <form
+              onSubmit={saveEdit}
+              style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}
+            >
               <div>
                 <label className="field-label">Concepto</label>
                 <input
@@ -1139,7 +1488,7 @@ export const LedgerTab: React.FC<LedgerTabProps> = ({
                   />
                 </div>
 
-                {editingEntry.type !== 'channel_transfer' && (
+                {editingEntry.type !== 'channel_transfer' ? (
                   <div>
                     <label className="field-label">Vía de pago</label>
                     <select
@@ -1149,6 +1498,20 @@ export const LedgerTab: React.FC<LedgerTabProps> = ({
                     >
                       <option value="efectivo">Efectivo</option>
                       <option value="transferencia">Transferencia</option>
+                    </select>
+                  </div>
+                ) : (
+                  <div>
+                    <label className="field-label">Dirección</label>
+                    <select
+                      className="neon-select"
+                      value={editTransferDirection}
+                      onChange={(e) =>
+                        setEditTransferDirection(e.target.value as TransferDirection)
+                      }
+                    >
+                      <option value="transf_to_cash">Transf → Efectivo</option>
+                      <option value="cash_to_transf">Efectivo → Transf</option>
                     </select>
                   </div>
                 )}
@@ -1163,6 +1526,48 @@ export const LedgerTab: React.FC<LedgerTabProps> = ({
                   />
                 </div>
               </div>
+
+              {editingEntry.type === 'channel_transfer' && (
+                <div>
+                  <div
+                    style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      marginBottom: '6px',
+                    }}
+                  >
+                    <label className="field-label" style={{ marginBottom: 0 }}>
+                      Comisión ({editFeeMode === 'percent' ? '%' : currencySymbol})
+                    </label>
+                    <div className="mini-fee-toggle">
+                      <button
+                        type="button"
+                        className={editFeeMode === 'percent' ? 'active' : ''}
+                        onClick={() => setEditFeeMode('percent')}
+                      >
+                        %
+                      </button>
+                      <button
+                        type="button"
+                        className={editFeeMode === 'fixed' ? 'active' : ''}
+                        onClick={() => setEditFeeMode('fixed')}
+                      >
+                        {currencySymbol}
+                      </button>
+                    </div>
+                  </div>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    className="neon-input mono-input"
+                    placeholder="0.00"
+                    value={editFeeStr}
+                    onChange={(e) => setEditFeeStr(e.target.value)}
+                  />
+                </div>
+              )}
 
               {editingEntry.type === 'expense' && (
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
@@ -1187,7 +1592,23 @@ export const LedgerTab: React.FC<LedgerTabProps> = ({
                     </select>
                   </div>
 
-                  {editDivision === 'inversiones' ? (
+                  {editDivision === 'hogar' ? (
+                    <div>
+                      <label className="field-label">Categoría del Hogar</label>
+                      <select
+                        className="neon-select"
+                        value={editHogarCategoryId}
+                        onChange={(e) => setEditHogarCategoryId(e.target.value)}
+                      >
+                        <option value="">General del hogar</option>
+                        {allHogarCategories.map((cat) => (
+                          <option key={cat.id} value={cat.id}>
+                            {cat.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  ) : editDivision === 'inversiones' ? (
                     <div>
                       <label className="field-label">Inversión</label>
                       <select
@@ -1233,7 +1654,11 @@ export const LedgerTab: React.FC<LedgerTabProps> = ({
               </div>
 
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '6px' }}>
-                <button type="button" className="btn btn-ghost" onClick={() => setEditingEntry(null)}>
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  onClick={() => setEditingEntry(null)}
+                >
                   Cancelar
                 </button>
                 <button type="submit" className="btn btn-cyan">

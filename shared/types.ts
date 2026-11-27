@@ -1,3 +1,5 @@
+import { HogarCategoryDef } from './hogarCategories';
+
 export type CoreDivisionId =
   | 'hogar'
   | 'deudas'
@@ -43,6 +45,7 @@ export interface SubItem {
   id: string;
   name: string;
   amount: number;
+  hogarCategoryId?: string;
 }
 
 export interface InvestmentDefinition {
@@ -72,9 +75,11 @@ export interface LedgerEntry {
   amount: number;   // Positive number (monto principal)
   paymentMethod: PaymentMethod;
   transferDirection?: TransferDirection; // Para type === 'channel_transfer'
-  transferFee?: number;                  // Comisión o descuento al cambiar efectivo <-> transferencia
+  transferFee?: number;                  // Comisión o descuento en monto al cambiar efectivo <-> transferencia
+  transferFeePercent?: number;           // Porcentaje (%) de comisión aplicado en el cambio
   concept: string;
   division: DivisionId;
+  hogarCategoryId?: string;              // Categoría visual de Gastos del Hogar (estilo Mis Gastos)
   investmentId?: string;
   pillar: KakeiboPillar;
   note?: string;
@@ -209,6 +214,7 @@ export interface UserProfile {
   currentSalaryEfectivo: number;
   currentSalaryTransferencia: number;
   hasManutencionesDefault: boolean;
+  customHogarCategories?: HogarCategoryDef[];
 }
 
 export interface AppDatabase {

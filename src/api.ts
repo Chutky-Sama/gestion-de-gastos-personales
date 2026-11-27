@@ -1,3 +1,4 @@
+import { HogarCategoryDef } from '../shared/hogarCategories';
 import {
   AppDatabase,
   EntryType,
@@ -132,6 +133,7 @@ export const api = {
     currentSalaryTransferencia?: number;
     currentSalary?: number;
     hasManutencionesDefault?: boolean;
+    customHogarCategories?: HogarCategoryDef[];
     syncMonthKey?: string;
   }) => {
     const info = await getDesktopInfo();
@@ -183,8 +185,10 @@ export const api = {
       paymentMethod?: PaymentMethod;
       transferDirection?: TransferDirection;
       transferFee?: number;
+      transferFeePercent?: number;
       concept: string;
       division: string;
+      hogarCategoryId?: string;
       investmentId?: string;
       pillar?: KakeiboPillar;
       note?: string;
@@ -208,8 +212,10 @@ export const api = {
       paymentMethod?: PaymentMethod;
       transferDirection?: TransferDirection;
       transferFee?: number;
+      transferFeePercent?: number;
       concept?: string;
       division?: string;
+      hogarCategoryId?: string;
       investmentId?: string;
       pillar?: KakeiboPillar;
       note?: string;

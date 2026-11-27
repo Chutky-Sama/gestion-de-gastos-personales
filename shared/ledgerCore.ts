@@ -9,6 +9,7 @@ import {
   round2,
 } from './calculations';
 import { findCurrencyOption } from './currencies';
+import { HogarCategoryDef } from './hogarCategories';
 import {
   AppDatabase,
   CurrencyLedgerWorkspace,
@@ -248,6 +249,10 @@ export function normalizeDatabaseCore(raw: Partial<AppDatabase>): AppDatabase {
     };
   }
 
+  if (!Array.isArray(db.profile.customHogarCategories)) {
+    db.profile.customHogarCategories = [];
+  }
+
   if (!Array.isArray(db.profile.enabledCurrencies) || db.profile.enabledCurrencies.length === 0) {
     const initialCodes = ['CUP', 'USD'];
     if (db.profile.currencyCode && !initialCodes.includes(db.profile.currencyCode)) {
@@ -460,9 +465,15 @@ export function applyUpdateProfile(
     currentSalaryTransferencia?: number;
     currentSalary?: number;
     hasManutencionesDefault?: boolean;
+    customHogarCategories?: HogarCategoryDef[];
     syncMonthKey?: string;
   }
 ): AppDatabase {
+  if (Array.isArray(payload.customHogarCategories)) {
+    db.profile.customHogarCategories = payload.customHogarCategories;
+    lockDemoIfRealMutation(db);
+  }
+
   if (Array.isArray(payload.enabledCurrencies) && payload.enabledCurrencies.length > 0) {
     applyUpdateEnabledCurrencies(db, payload.enabledCurrencies, payload.currencyCode);
   } else if (payload.currencyCode) {
@@ -706,8 +717,10 @@ export function applyAddEntry(
     paymentMethod?: PaymentMethod;
     transferDirection?: TransferDirection;
     transferFee?: number;
+    transferFeePercent?: number;
     concept: string;
     division: string;
+    hogarCategoryId?: string;
     investmentId?: string;
     pillar?: KakeiboPillar;
     note?: string;
@@ -733,6 +746,20 @@ export function applyAddEntry(
     payload.paymentMethod === 'transferencia' ? 'transferencia' : 'efectivo';
   const isTraspaso = payload.type === 'channel_transfer';
 
+  const resolvedFeePct =
+    isTraspaso && payload.transferFeePercent !== undefined
+      ? round2(Math.max(0, Number(payload.transferFeePercent) || 0))
+      : undefined;
+  const resolvedFeeAmt = isTraspaso
+    ? payload.transferFee !== undefined
+      ? round2(Math.max(0, Number(payload.transferFee) || 0))
+      : resolvedFeePct !== undefined
+      ? round2((numericAmount * resolvedFeePct) / 100)
+      : 0
+    : undefined;
+
+  const targetDivision = payload.division || (isTraspaso ? 'bolsillo' : 'general');
+
   const entry: LedgerEntry = {
     id: generateId(),
     monthKey,
@@ -749,10 +776,12 @@ export function applyAddEntry(
         : 'transferencia'
       : method,
     transferDirection: isTraspaso ? payload.transferDirection || 'transf_to_cash' : undefined,
-    transferFee: isTraspaso ? round2(Math.max(0, Number(payload.transferFee) || 0)) : undefined,
+    transferFee: resolvedFeeAmt,
+    transferFeePercent: resolvedFeePct,
     concept: (payload.concept || '').trim() || 'Movimiento sin título',
-    division: payload.division || (isTraspaso ? 'bolsillo' : 'general'),
-    investmentId: payload.division === 'inversiones' ? payload.investmentId : undefined,
+    division: targetDivision,
+    hogarCategoryId: targetDivision === 'hogar' ? payload.hogarCategoryId : undefined,
+    investmentId: targetDivision === 'inversiones' ? payload.investmentId : undefined,
     pillar:
       payload.pillar ||
       (isTraspaso
@@ -761,7 +790,7 @@ export function applyAddEntry(
         ? 'ingreso'
         : payload.type === 'adjustment_up' || payload.type === 'adjustment_down'
         ? 'ajuste'
-        : payload.division === 'inversiones' || payload.division === 'deudas'
+        : targetDivision === 'inversiones' || targetDivision === 'deudas'
         ? 'patrimonio'
         : 'supervivencia'),
     note: payload.note?.trim() || undefined,
@@ -775,12 +804,15 @@ export function applyAddEntry(
       entry.transferDirection === 'cash_to_transf'
         ? 'Efectivo → Transferencia'
         : 'Transferencia → Efectivo';
+    const feeDesc = entry.transferFee
+      ? ` · Comisión${entry.transferFeePercent ? ` (${entry.transferFeePercent}%)` : ''}: ${ws.currencySymbol}${entry.transferFee.toFixed(2)}`
+      : '';
     appendHistoryCore(db, {
       monthKey,
       currencyCode: ws.currencyCode,
       eventType: 'channel_transfer',
       title: `Cambio ${dirLabel} (${ws.currencySymbol}${numericAmount.toFixed(2)})`,
-      detail: `${entry.concept}${entry.transferFee ? ` · Comisión: ${ws.currencySymbol}${entry.transferFee.toFixed(2)}` : ''}`,
+      detail: `${entry.concept}${feeDesc}`,
       amount: numericAmount,
     });
   }
@@ -799,8 +831,10 @@ export function applyUpdateEntry(
     paymentMethod?: PaymentMethod;
     transferDirection?: TransferDirection;
     transferFee?: number;
+    transferFeePercent?: number;
     concept?: string;
     division?: string;
+    hogarCategoryId?: string;
     investmentId?: string;
     pillar?: KakeiboPillar;
     note?: string;
@@ -821,6 +855,7 @@ export function applyUpdateEntry(
   if (numericAmount <= 0) throw new Error('El monto debe ser mayor que cero.');
 
   const nextDivision = payload.division ?? existing.division;
+  const nextType = payload.type ?? existing.type;
 
   month.entries[idx] = {
     ...existing,
@@ -828,7 +863,7 @@ export function applyUpdateEntry(
       typeof payload.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(payload.date)
         ? payload.date
         : existing.date,
-    type: payload.type ?? existing.type,
+    type: nextType,
     amount: numericAmount,
     paymentMethod: payload.paymentMethod ?? existing.paymentMethod,
     transferDirection: payload.transferDirection ?? existing.transferDirection,
@@ -836,8 +871,18 @@ export function applyUpdateEntry(
       payload.transferFee !== undefined
         ? round2(Math.max(0, Number(payload.transferFee) || 0))
         : existing.transferFee,
+    transferFeePercent:
+      payload.transferFeePercent !== undefined
+        ? round2(Math.max(0, Number(payload.transferFeePercent) || 0))
+        : existing.transferFeePercent,
     concept: payload.concept?.trim() || existing.concept,
     division: nextDivision,
+    hogarCategoryId:
+      nextDivision === 'hogar'
+        ? payload.hogarCategoryId !== undefined
+          ? payload.hogarCategoryId || undefined
+          : existing.hogarCategoryId
+        : undefined,
     investmentId: nextDivision === 'inversiones' ? payload.investmentId : undefined,
     pillar: payload.pillar ?? existing.pillar,
     note: typeof payload.note === 'string' ? payload.note.trim() || undefined : existing.note,
@@ -1131,8 +1176,10 @@ export function applyStartOneTimeDemo(db: AppDatabase): AppDatabase {
           deudas: 1500,
           manutenciones: 2000,
           hogarItems: [
-            { id: generateId(), name: 'Compra de alimentos y agro', amount: 6500 },
-            { id: generateId(), name: 'Electricidad, Nauta e Internet', amount: 2000 },
+            { id: generateId(), name: 'Alimentos', amount: 4500, hogarCategoryId: 'alimentos' },
+            { id: generateId(), name: 'Verduras', amount: 2000, hogarCategoryId: 'verduras' },
+            { id: generateId(), name: 'Electricidad', amount: 1200, hogarCategoryId: 'electricidad' },
+            { id: generateId(), name: 'Transporte', amount: 800, hogarCategoryId: 'transporte' },
           ],
           deudasItems: [{ id: generateId(), name: 'Pago pendiente mensual', amount: 1500 }],
           manutencionesItems: [{ id: generateId(), name: 'Apoyo familiar', amount: 2000 }],
@@ -1145,7 +1192,7 @@ export function applyStartOneTimeDemo(db: AppDatabase): AppDatabase {
         reflection: {
           howMuchCanISave:
             'Mantener suficiente efectivo a mano para el agro y pagar servicios por Transfermóvil.',
-          improvementPlan: 'Evitar comisiones altas sacando efectivo con tiempo en Caja Extra.',
+          improvementPlan: 'Vigilar el % de comisión al pasar saldo de tarjeta a billetes en efectivo.',
           closingNotes: '',
           mood: 'estable',
         },
@@ -1156,10 +1203,11 @@ export function applyStartOneTimeDemo(db: AppDatabase): AppDatabase {
             date: `${dayPrefix}-02`,
             createdAt: new Date(Date.now() - 500000).toISOString(),
             type: 'expense',
-            amount: 1850,
+            amount: 1150,
             paymentMethod: 'transferencia',
             concept: 'Pago Electricidad y Recarga Nauta (Transfermóvil)',
             division: 'hogar',
+            hogarCategoryId: 'electricidad',
             pillar: 'supervivencia',
             note: 'Pagado directo desde tarjeta con descuento',
           },
@@ -1172,22 +1220,50 @@ export function applyStartOneTimeDemo(db: AppDatabase): AppDatabase {
             amount: 4000,
             paymentMethod: 'transferencia',
             transferDirection: 'transf_to_cash',
-            transferFee: 0,
-            concept: 'Extracción por Caja Extra a billetes en efectivo',
+            transferFee: 320,
+            transferFeePercent: 8,
+            concept: 'Cambio de saldo Transferencia a Efectivo (comisión 8%)',
             division: 'bolsillo',
             pillar: 'traspaso',
-            note: 'Pasa de Transferencia a Efectivo sin comisión',
+            note: 'Salen $4,000 de tarjeta · Comisión 8% ($320) · Recibes $3,680 netos en efectivo',
           },
           {
             id: generateId(),
             monthKey,
             date: `${dayPrefix}-06`,
+            createdAt: new Date(Date.now() - 350000).toISOString(),
+            type: 'expense',
+            amount: 2450,
+            paymentMethod: 'efectivo',
+            concept: 'Compra de carne, arroz y despensa',
+            division: 'hogar',
+            hogarCategoryId: 'alimentos',
+            pillar: 'supervivencia',
+          },
+          {
+            id: generateId(),
+            monthKey,
+            date: `${dayPrefix}-08`,
             createdAt: new Date(Date.now() - 300000).toISOString(),
             type: 'expense',
-            amount: 3200,
+            amount: 950,
             paymentMethod: 'efectivo',
-            concept: 'Compra de viandas, carne y despensa (solo aceptaban efectivo)',
+            concept: 'Agro: viandas, tomate y frutas frescas',
             division: 'hogar',
+            hogarCategoryId: 'verduras',
+            pillar: 'supervivencia',
+          },
+          {
+            id: generateId(),
+            monthKey,
+            date: `${dayPrefix}-10`,
+            createdAt: new Date(Date.now() - 250000).toISOString(),
+            type: 'expense',
+            amount: 450,
+            paymentMethod: 'efectivo',
+            concept: 'Pasajes de la semana',
+            division: 'hogar',
+            hogarCategoryId: 'transporte',
             pillar: 'supervivencia',
           },
           {
