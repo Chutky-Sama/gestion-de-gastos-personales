@@ -459,8 +459,8 @@ export const InvestmentsTab: React.FC<InvestmentsTabProps> = ({
       )}
 
       {editingInv && (
-        <div className="modal-backdrop" onClick={() => setEditingInv(null)}>
-          <div className="modal-panel" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-backdrop">
+          <div className="modal-panel">
             <div className="modal-header">
               <h3>Editar Inversión</h3>
               <button type="button" className="icon-btn" onClick={() => setEditingInv(null)}>

@@ -116,11 +116,10 @@ export const SalaryQuickModal: React.FC<SalaryQuickModalProps> = ({
   };
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
+    <div className="modal-backdrop">
       <div
         className="modal-panel"
         style={{ maxWidth: '580px' }}
-        onClick={(e) => e.stopPropagation()}
       >
         <div className="modal-header">
           <h3 style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>

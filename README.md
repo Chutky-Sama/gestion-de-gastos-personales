@@ -8,7 +8,7 @@ Sistema personal de gestión mensual de gastos e inversiones con estética **Cyb
 
 No necesitas instalar Node.js, ni Python, ni abrir ninguna consola:
 
-1. Descarga el archivo **`NeonKakeibo.exe`** directamente desde el repositorio (pesa ~675 KB y trae todo integrado en un solo ejecutable).
+1. Descarga el archivo **`NeonKakeibo.exe`** directamente desde el repositorio (~1.05 MB, todo integrado en un solo ejecutable sin dependencias externas).
 2. Haz **doble clic en `NeonKakeibo.exe`**.
    > **Nota de Windows:** Como es un programa personal creado a medida (sin certificado comercial de Microsoft Store), la primera vez que lo abras puede aparecer el aviso azul *"Windows protegió su PC"*. Solo haz clic en **"Más información"** y luego en **"Ejecutar de todas formas"**.
 3. ¡Listo! Se abrirá en su propia ventana oscura de escritorio. Si ya usabas una versión previa, tus datos anteriores se migran automáticamente sin perder nada.
@@ -26,9 +26,16 @@ No necesitas instalar Node.js, ni Python, ni abrir ninguna consola:
 * **Control en Paralelo: Efectivo y Transferencia**:
   * Configura tu salario e inicio de mes separando cuánto recibes en **Efectivo** y cuánto por **Transferencia**.
   * Registra cada gasto, ingreso o aporte a inversión indicando si fue en **Efectivo** o **Transferencia**.
-  * **Pasar Efectivo ⇄ Transferencia:** Registra extracciones de *Caja Extra* / cajero o cambios entre transferencia y efectivo (con comisión opcional si aplica).
+  * **Pasar Efectivo ⇄ Transferencia con Comisión en `%` o `$`:** Registra extracciones o cambios entre transferencia y efectivo calculando automáticamente el porcentaje de comisión (`%`) o monto fijo y mostrando al instante cuánto sale, cuánto se descuenta y cuánto recibes neto.
   * **Columnas en paralelo en el Libro Diario:** Visualiza renglón por renglón tu **Saldo Efectivo**, **Saldo Transferencia** y **Total General**.
   * **Ajuste directo (`+` / `-` / Monto exacto)** independiente para Efectivo o Transferencia.
+* **Gastos del Hogar con Cuadrícula Visual Estilo *"Mis Gastos"*:**
+  * Cuadrícula circular de íconos rápidos (`Compras`, `Alimentos`, `Teléfono`, `Entretenimiento`, `Educación`, `Belleza`, `Deportes`, `Social`, `Transporte`, `Ropa`, `Auto`, `Bebidas`, `Cigarrillos`, `Electrónica`, `Viajes`, `Salud`, `Mascotas`, `Reparaciones`, `Vivienda`, `Hogar`, `Regalos`, `Donaciones`, `Lotería`, `Snacks`, `Hijos`, `Verduras`, `Frutas`, servicios y botón **`+ Ajustes`** para crear categorías propias) tanto al asignar sobres como al registrar gastos diarios.
+* **Calendario Desplegable Extendido y Selector Multi-Año / Mes:**
+  * Navega desde la barra superior abriendo la cuadrícula completa de días del mes (con ingresos/gastos diarios y filtro por día con 1 clic) o el selector de **12 meses y múltiples años**.
+* **Centro de Informes y Gráficos (`Informes y Gráficos` · 100% Offline):**
+  * Gráficos interactivos en tiempo real: **Anillo / Pastel (Donut)** por categorías del hogar, sobres o pilares Kakeibo; **Curva Diaria de Saldos** (Total, Efectivo y Transferencia); **Barras Verticales Comparativas** (5 semanas y Planificado vs. Real); ** División por Canal (`Efectivo` vs `Transferencia`)** y **Comparativa Histórica Multimes**.
+* **Ventanas Emergentes Protegidas:** Ningún modal se cierra al hacer clic accidental fuera de él, evitando perder cambios sin guardar.
 * **Monedas de Cuba y Multimoneda en Paralelo (`CUP`, `USD`, `MLC`, `EUR`...)**:
   * Incluye **Peso Cubano (`CUP`)**, **Dólar Estadounidense (`USD`)**, **`MLC`**, **Euro (`EUR`)** y monedas internacionales adicionales.
   * Cambia con 1 clic en la barra superior entre tu libreta en **`CUP`** y tu libreta en **`USD`** (u otras monedas habilitadas) sin mezclar saldos.

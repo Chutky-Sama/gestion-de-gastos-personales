@@ -19,6 +19,7 @@ import {
   createInitialDatabaseCore,
   normalizeDatabaseCore,
 } from '../shared/ledgerCore';
+import { HogarCategoryDef } from '../shared/hogarCategories';
 import {
   AppDatabase,
   EntryType,
@@ -94,6 +95,7 @@ export const desktopEngine = {
     currentSalaryTransferencia?: number;
     currentSalary?: number;
     hasManutencionesDefault?: boolean;
+    customHogarCategories?: HogarCategoryDef[];
     syncMonthKey?: string;
   }) => {
     const db = await loadDesktopDb();
@@ -133,8 +135,10 @@ export const desktopEngine = {
       paymentMethod?: PaymentMethod;
       transferDirection?: TransferDirection;
       transferFee?: number;
+      transferFeePercent?: number;
       concept: string;
       division: string;
+      hogarCategoryId?: string;
       investmentId?: string;
       pillar?: KakeiboPillar;
       note?: string;
@@ -154,8 +158,10 @@ export const desktopEngine = {
       paymentMethod?: PaymentMethod;
       transferDirection?: TransferDirection;
       transferFee?: number;
+      transferFeePercent?: number;
       concept?: string;
       division?: string;
+      hogarCategoryId?: string;
       investmentId?: string;
       pillar?: KakeiboPillar;
       note?: string;

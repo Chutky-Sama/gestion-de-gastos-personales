@@ -114,8 +114,8 @@ export const AdjustBalanceModal: React.FC<AdjustBalanceModalProps> = ({
   };
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal-panel" onClick={(e) => e.stopPropagation()}>
+    <div className="modal-backdrop">
+      <div className="modal-panel">
         <div className="modal-header">
           <h3>
             Modificar Saldo ({currencyCode}) · {monthLabel}

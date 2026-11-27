@@ -1,8 +1,8 @@
 1 ICON "desktop/neon_kakeibo.ico"
 
 1 VERSIONINFO
-FILEVERSION 1,0,0,0
-PRODUCTVERSION 1,0,0,0
+FILEVERSION 2,2,0,0
+PRODUCTVERSION 2,2,0,0
 BEGIN
   BLOCK "StringFileInfo"
   BEGIN
@@ -10,11 +10,11 @@ BEGIN
     BEGIN
       VALUE "CompanyName", "Neon Kakeibo"
       VALUE "FileDescription", "Neon Kakeibo - Gestion Mensual de Gastos Personales"
-      VALUE "FileVersion", "1.0.0"
+      VALUE "FileVersion", "2.2.0"
       VALUE "InternalName", "NeonKakeibo"
       VALUE "OriginalFilename", "NeonKakeibo.exe"
       VALUE "ProductName", "Neon Kakeibo"
-      VALUE "ProductVersion", "1.0.0"
+      VALUE "ProductVersion", "2.2.0"
     END
   END
   BLOCK "VarFileInfo"

@@ -5,13 +5,13 @@ import {
   ArrowUpRight,
   Banknote,
   BookOpen,
-  ChevronLeft,
-  ChevronRight,
   Coins,
+  Edit3,
   HardDrive,
   History,
   Layers,
   LogOut,
+  PieChart,
   Plus,
   Settings,
   ShieldCheck,
@@ -37,13 +37,21 @@ import { DesktopInfo, api } from './api';
 import { AdjustBalanceModal } from './components/AdjustBalanceModal';
 import { CurrencyExchangeTab } from './components/CurrencyExchangeTab';
 import { EnvelopesTab } from './components/EnvelopesTab';
+import { ExtendedDatePicker } from './components/ExtendedDatePicker';
 import { HistoryTab } from './components/HistoryTab';
 import { InvestmentsTab } from './components/InvestmentsTab';
 import { LedgerTab } from './components/LedgerTab';
+import { ReportsTab } from './components/ReportsTab';
 import { SalaryQuickModal } from './components/SalaryQuickModal';
 import { formatMoney } from './utils/format';
 
-type ActiveTab = 'ledger' | 'envelopes' | 'investments' | 'exchange' | 'history';
+type ActiveTab =
+  | 'ledger'
+  | 'envelopes'
+  | 'investments'
+  | 'reports'
+  | 'exchange'
+  | 'history';
 
 export const App: React.FC = () => {
   const [db, setDb] = useState<AppDatabase | null>(null);
@@ -51,6 +59,7 @@ export const App: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [activeMonthKey, setActiveMonthKey] = useState<string>(getCurrentMonthKey());
+  const [selectedDayFilter, setSelectedDayFilter] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<ActiveTab>('ledger');
 
   const [isAdjustOpen, setIsAdjustOpen] = useState(false);
@@ -184,6 +193,7 @@ export const App: React.FC = () => {
 
   const currencySymbol = activeWorkspace.currencySymbol;
   const currencyCode = activeWorkspace.currencyCode;
+  const customHogarCategories = db.profile.customHogarCategories || [];
   const demoAvailable = canStartDemo(db);
   const exitDemoAvailable = canExitDemoReset(db);
 
@@ -195,7 +205,7 @@ export const App: React.FC = () => {
 
   return (
     <div className="app-shell">
-      {/* Top Bar */}
+      {/* Top Bar: Left customizable title + separated pill; Right pinned currency/calendar/salary */}
       <header className="topbar">
         <div className="brand-cluster">
           <img
@@ -204,11 +214,18 @@ export const App: React.FC = () => {
             className="personal-seal-img"
           />
           <div className="brand-title">
-            <h1>
-              {db.profile.ledgerName}
+            <div className="brand-title-row">
+              <h1
+                className="ledger-custom-name"
+                title="Clic para cambiar el nombre personalizado de tu libreta"
+                onClick={() => setIsSalaryModalOpen(true)}
+              >
+                <span>{db.profile.ledgerName}</span>
+                <Edit3 size={14} className="ledger-edit-hint" />
+              </h1>
               <span className="brand-badge">Efectivo · Transferencia</span>
-            </h1>
-            <p>
+            </div>
+            <p className="brand-status-line">
               <span className="pulse-dot" />
               {desktopInfo.isDesktop ? (
                 <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
@@ -216,7 +233,7 @@ export const App: React.FC = () => {
                   Continuo Día 1
                 </span>
               ) : (
-                <>Guardado continuo desde el Día 1 · CUP / USD en paralelo</>
+                <span>Guardado continuo desde el Día 1 · CUP / USD en paralelo</span>
               )}
             </p>
           </div>
@@ -246,35 +263,19 @@ export const App: React.FC = () => {
             </button>
           </div>
 
-          <div className="month-switcher">
-            <button
-              type="button"
-              className="icon-btn"
-              title="Mes anterior"
-              onClick={() => handleSelectMonth(shiftMonthKey(activeMonthKey, -1))}
-            >
-              <ChevronLeft size={18} />
-            </button>
-            <div className="month-switcher-label">{formatMonthLabel(activeMonthKey)}</div>
-            <button
-              type="button"
-              className="icon-btn"
-              title="Mes siguiente"
-              onClick={() => handleSelectMonth(shiftMonthKey(activeMonthKey, 1))}
-            >
-              <ChevronRight size={18} />
-            </button>
-          </div>
-
-          {activeMonthKey !== getCurrentMonthKey() && (
-            <button
-              type="button"
-              className="btn btn-sm btn-ghost"
-              onClick={() => handleSelectMonth(getCurrentMonthKey())}
-            >
-              Hoy
-            </button>
-          )}
+          {/* Improvement #6: Extended Calendar & Multi-Year/Month Navigator */}
+          <ExtendedDatePicker
+            activeMonthKey={activeMonthKey}
+            selectedDayFilter={selectedDayFilter}
+            workspace={activeWorkspace}
+            onSelectMonth={(mk) => handleSelectMonth(mk)}
+            onSelectDayFilter={(dateStr) => {
+              setSelectedDayFilter(dateStr);
+              if (dateStr && activeTab !== 'ledger') {
+                setActiveTab('ledger');
+              }
+            }}
+          />
 
           <button
             type="button"
@@ -331,7 +332,9 @@ export const App: React.FC = () => {
                   const next = await api.resetDatabase();
                   setDb(next);
                   setConfirmTopDemoExit(false);
-                  showToast('Demo finalizada. Tu libreta real está limpia y protegida contra borrado.');
+                  showToast(
+                    'Demo finalizada. Tu libreta real está limpia y protegida contra borrado.'
+                  );
                 }}
               >
                 <ShieldCheck size={15} /> Confirmar: Limpiar Demo y Proteger Modo Real
@@ -510,7 +513,10 @@ export const App: React.FC = () => {
           <div className="kpi-value">{formatMoney(summary.salary, currencySymbol)}</div>
           <div className="kpi-sub">
             <span>
-              Efec: <strong className="mono text-emerald">{formatMoney(summary.salaryEfectivo, currencySymbol)}</strong>
+              Efec:{' '}
+              <strong className="mono text-emerald">
+                {formatMoney(summary.salaryEfectivo, currencySymbol)}
+              </strong>
             </span>
             <span>
               Transf:{' '}
@@ -542,7 +548,9 @@ export const App: React.FC = () => {
           <div className="kpi-sub">
             <span>
               Ejecutado:{' '}
-              <strong className="mono">{formatMoney(summary.totalOutflowAll, currencySymbol)}</strong>
+              <strong className="mono">
+                {formatMoney(summary.totalOutflowAll, currencySymbol)}
+              </strong>
             </span>
             <span>
               Inv:{' '}
@@ -614,7 +622,7 @@ export const App: React.FC = () => {
           className={`nav-tab ${activeTab === 'ledger' ? 'active' : ''}`}
           onClick={() => setActiveTab('ledger')}
         >
-          <BookOpen size={17} />
+          <BookOpen size={16} />
           Libro Diario ({currencyCode})
           <span className="tab-badge">{activeMonth.entries.length}</span>
         </button>
@@ -624,7 +632,7 @@ export const App: React.FC = () => {
           className={`nav-tab ${activeTab === 'envelopes' ? 'active' : ''}`}
           onClick={() => setActiveTab('envelopes')}
         >
-          <Layers size={17} />
+          <Layers size={16} />
           División en Sobres
         </button>
 
@@ -633,8 +641,8 @@ export const App: React.FC = () => {
           className={`nav-tab ${activeTab === 'investments' ? 'active' : ''}`}
           onClick={() => setActiveTab('investments')}
         >
-          <TrendingUp size={17} />
-          Mis Inversiones
+          <TrendingUp size={16} />
+          Inversiones
           <span className="tab-badge">
             {activeWorkspace.investments.filter((i) => i.active).length}
           </span>
@@ -642,11 +650,20 @@ export const App: React.FC = () => {
 
         <button
           type="button"
+          className={`nav-tab ${activeTab === 'reports' ? 'active' : ''}`}
+          onClick={() => setActiveTab('reports')}
+        >
+          <PieChart size={16} />
+          Informes y Gráficos
+        </button>
+
+        <button
+          type="button"
           className={`nav-tab ${activeTab === 'exchange' ? 'active' : ''}`}
           onClick={() => setActiveTab('exchange')}
         >
-          <ArrowLeftRight size={17} />
-          Cambio de Monedas (CUP)
+          <ArrowLeftRight size={16} />
+          Cambio (CUP)
         </button>
 
         <button
@@ -654,8 +671,8 @@ export const App: React.FC = () => {
           className={`nav-tab ${activeTab === 'history' ? 'active' : ''}`}
           onClick={() => setActiveTab('history')}
         >
-          <History size={17} />
-          Historial Día 1 y Respaldo
+          <History size={16} />
+          Historial y Respaldo
         </button>
       </nav>
 
@@ -666,6 +683,9 @@ export const App: React.FC = () => {
             month={activeMonth}
             summary={summary}
             investments={activeWorkspace.investments}
+            customHogarCategories={customHogarCategories}
+            selectedDayFilter={selectedDayFilter}
+            onClearDayFilter={() => setSelectedDayFilter(null)}
             currencySymbol={currencySymbol}
             currencyCode={currencyCode}
             onAddEntry={async (payload) => {
@@ -702,12 +722,20 @@ export const App: React.FC = () => {
             previousMonthKey={previousMonthKey}
             summary={summary}
             investments={activeWorkspace.investments}
+            customHogarCategories={customHogarCategories}
             currencySymbol={currencySymbol}
             currencyCode={currencyCode}
             onSavePlan={async (payload) => {
               const next = await api.updateMonthPlan(activeMonth.monthKey, payload);
               setDb(next);
               showToast(`División de sobres (${currencyCode}) guardada`);
+            }}
+            onUpdateCustomHogarCategories={async (nextCategories) => {
+              const next = await api.updateProfile({
+                customHogarCategories: nextCategories,
+              });
+              setDb(next);
+              showToast('Categorías de Gastos del Hogar actualizadas');
             }}
             onBringCarryover={async (prevMk) => {
               const prevMonth = activeWorkspace.months[prevMk];
@@ -718,7 +746,9 @@ export const App: React.FC = () => {
                 carryoverTransferencia: prevSum.currentTransferenciaBalance,
               });
               setDb(next);
-              showToast(`Saldos Efectivo y Transferencia traídos desde ${formatMonthLabel(prevMk)}`);
+              showToast(
+                `Saldos Efectivo y Transferencia traídos desde ${formatMonthLabel(prevMk)}`
+              );
             }}
             onNavigateInvestments={() => setActiveTab('investments')}
           />
@@ -777,6 +807,15 @@ export const App: React.FC = () => {
           />
         )}
 
+        {activeTab === 'reports' && (
+          <ReportsTab
+            workspace={activeWorkspace}
+            month={activeMonth}
+            summary={summary}
+            customHogarCategories={customHogarCategories}
+          />
+        )}
+
         {activeTab === 'exchange' && (
           <CurrencyExchangeTab
             db={db}
@@ -808,6 +847,7 @@ export const App: React.FC = () => {
             activeWorkspace={activeWorkspace}
             desktopInfo={desktopInfo}
             onSelectMonth={(mk) => {
+              setSelectedDayFilter(null);
               handleSelectMonth(mk);
               setActiveTab('ledger');
             }}
@@ -816,6 +856,7 @@ export const App: React.FC = () => {
                 const next = await api.loadDemo();
                 setDb(next);
                 setActiveMonthKey(getCurrentMonthKey());
+                setSelectedDayFilter(null);
                 setActiveTab('ledger');
                 showToast('Demo de 1 solo uso cargada');
               } catch (err: unknown) {
@@ -827,8 +868,11 @@ export const App: React.FC = () => {
                 const next = await api.resetDatabase();
                 setDb(next);
                 setActiveMonthKey(getCurrentMonthKey());
+                setSelectedDayFilter(null);
                 setActiveTab('ledger');
-                showToast('Demo limpiada. Tu libreta real está lista y protegida contra borrado.');
+                showToast(
+                  'Demo limpiada. Tu libreta real está lista y protegida contra borrado.'
+                );
               } catch (err: unknown) {
                 alert(err instanceof Error ? err.message : 'El reinicio no está disponible.');
               }
