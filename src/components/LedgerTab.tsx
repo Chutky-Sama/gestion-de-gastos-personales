@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowDownRight,
   ArrowLeftRight,
@@ -8,8 +8,10 @@ import {
   BookOpen,
   Calendar,
   Check,
+  ChevronDown,
   Edit3,
-  Grid,
+  Home,
+  Layers,
   Percent,
   Plus,
   Search,
@@ -134,11 +136,49 @@ export const LedgerTab: React.FC<LedgerTabProps> = ({
   const [feeInputMode, setFeeInputMode] = useState<'percent' | 'fixed'>('percent');
   const [transferFeeStr, setTransferFeeStr] = useState('');
 
+  // Solo mostrar en el menú desplegable las categorías de Gastos del Hogar con presupuesto asignado este mes
+  const budgetedHogarOptions = useMemo(() => {
+    const spentByCat: Record<string, number> = {};
+    for (const e of month.entries) {
+      if (e.type === 'expense' && e.division === 'hogar' && e.hogarCategoryId) {
+        spentByCat[e.hogarCategoryId] = round2((spentByCat[e.hogarCategoryId] || 0) + e.amount);
+      }
+    }
+
+    const plannedByCat: Record<string, number> = {};
+    for (const item of month.allocations.hogarItems || []) {
+      const amt = round2(Number(item.amount) || 0);
+      if (amt <= 0) continue;
+      let matchedId = item.hogarCategoryId;
+      if (!matchedId && item.name?.trim()) {
+        const byName = allHogarCategories.find(
+          (c) => c.name.toLowerCase() === item.name.trim().toLowerCase()
+        );
+        if (byName) matchedId = byName.id;
+      }
+      if (matchedId) {
+        plannedByCat[matchedId] = round2((plannedByCat[matchedId] || 0) + amt);
+      }
+    }
+
+    return allHogarCategories
+      .filter((c) => (plannedByCat[c.id] || 0) > 0)
+      .map((cat) => {
+        const planned = plannedByCat[cat.id] || 0;
+        const spent = spentByCat[cat.id] || 0;
+        const remaining = round2(planned - spent);
+        return { cat, planned, spent, remaining };
+      });
+  }, [allHogarCategories, month.allocations.hogarItems, month.entries]);
+
   const [concept, setConcept] = useState('');
   const [amountStr, setAmountStr] = useState('');
   const [division, setDivision] = useState<string>('hogar');
-  const [hogarCategoryId, setHogarCategoryId] = useState<string>('alimentos');
-  const [showHogarGrid, setShowHogarGrid] = useState<boolean>(true);
+  const [hogarCategoryId, setHogarCategoryId] = useState<string>(
+    () => budgetedHogarOptions[0]?.cat.id || ''
+  );
+  const [isHogarDropdownOpen, setIsHogarDropdownOpen] = useState<boolean>(false);
+  const hogarDropdownRef = useRef<HTMLDivElement | null>(null);
   const [investmentId, setInvestmentId] = useState<string>('');
   const [pillar, setPillar] = useState<KakeiboPillar>('supervivencia');
   const [date, setDate] = useState<string>(defaultDateForMonth);
@@ -192,8 +232,44 @@ export const LedgerTab: React.FC<LedgerTabProps> = ({
     }
   }, [division, investmentId, activeInvestments]);
 
+  // Mantener la categoría seleccionada sincronizada con las que tienen presupuesto asignado este mes
+  useEffect(() => {
+    if (budgetedHogarOptions.length === 0) {
+      if (hogarCategoryId !== '') {
+        setHogarCategoryId('');
+      }
+      return;
+    }
+    if (
+      hogarCategoryId !== '' &&
+      !budgetedHogarOptions.some((opt) => opt.cat.id === hogarCategoryId)
+    ) {
+      setHogarCategoryId(budgetedHogarOptions[0].cat.id);
+    }
+  }, [budgetedHogarOptions, hogarCategoryId]);
+
+  // Cerrar el menú desplegable compacto de categorías al hacer clic fuera o presionar Escape
+  useEffect(() => {
+    if (!isHogarDropdownOpen) return;
+    const onDocMouseDown = (ev: MouseEvent) => {
+      if (hogarDropdownRef.current && !hogarDropdownRef.current.contains(ev.target as Node)) {
+        setIsHogarDropdownOpen(false);
+      }
+    };
+    const onDocKeyDown = (ev: KeyboardEvent) => {
+      if (ev.key === 'Escape') setIsHogarDropdownOpen(false);
+    };
+    document.addEventListener('mousedown', onDocMouseDown);
+    document.addEventListener('keydown', onDocKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', onDocMouseDown);
+      document.removeEventListener('keydown', onDocKeyDown);
+    };
+  }, [isHogarDropdownOpen]);
+
   const handleModeChange = (nextMode: 'expense' | 'income' | 'channel_transfer') => {
     setEntryMode(nextMode);
+    setIsHogarDropdownOpen(false);
     if (nextMode === 'income') {
       setDivision('general');
       setPillar('ingreso');
@@ -208,6 +284,7 @@ export const LedgerTab: React.FC<LedgerTabProps> = ({
 
   const handleDivisionChange = (nextDiv: string) => {
     setDivision(nextDiv);
+    setIsHogarDropdownOpen(false);
     if (nextDiv === 'inversiones' || nextDiv === 'deudas') {
       setPillar('patrimonio');
     } else if (nextDiv === 'bolsillo') {
@@ -217,12 +294,20 @@ export const LedgerTab: React.FC<LedgerTabProps> = ({
     }
   };
 
-  const handleSelectHogarCatInComposer = (cat: HogarCategoryDef) => {
+  const handleSelectHogarCatInComposer = (cat: HogarCategoryDef | null) => {
     const prevCat = findHogarCategory(hogarCategoryId, customHogarCategories);
-    setHogarCategoryId(cat.id);
-    if (!concept.trim() || (prevCat && concept.trim() === prevCat.name)) {
-      setConcept(cat.name);
+    if (!cat) {
+      setHogarCategoryId('');
+      if (prevCat && concept.trim() === prevCat.name) {
+        setConcept('');
+      }
+    } else {
+      setHogarCategoryId(cat.id);
+      if (!concept.trim() || (prevCat && concept.trim() === prevCat.name)) {
+        setConcept(cat.name);
+      }
     }
+    setIsHogarDropdownOpen(false);
   };
 
   // Live calculation for channel_transfer with % or fixed commission
@@ -280,7 +365,9 @@ export const LedgerTab: React.FC<LedgerTabProps> = ({
             ? 'bolsillo'
             : division,
         hogarCategoryId:
-          entryMode === 'expense' && division === 'hogar' ? hogarCategoryId : undefined,
+          entryMode === 'expense' && division === 'hogar'
+            ? hogarCategoryId || undefined
+            : undefined,
         investmentId:
           entryMode === 'expense' && division === 'inversiones'
             ? investmentId || undefined
@@ -549,17 +636,6 @@ export const LedgerTab: React.FC<LedgerTabProps> = ({
               </div>
             )}
 
-            {entryMode === 'expense' && division === 'hogar' && (
-              <button
-                type="button"
-                className={`btn btn-sm ${showHogarGrid ? 'btn-cyan' : 'btn-ghost'}`}
-                onClick={() => setShowHogarGrid((v) => !v)}
-              >
-                <Grid size={14} />
-                {showHogarGrid ? 'Ocultar Íconos Hogar' : 'Elegir Ícono Hogar'}
-              </button>
-            )}
-
             <button
               type="button"
               className="btn btn-sm btn-ghost"
@@ -824,7 +900,117 @@ export const LedgerTab: React.FC<LedgerTabProps> = ({
                   </div>
                 )}
 
-                {entryMode === 'expense' && division === 'inversiones' ? (
+                {entryMode === 'expense' && division === 'hogar' ? (
+                  <div className="hogar-dropdown-wrap" ref={hogarDropdownRef}>
+                    <label className="field-label">Categoría del Hogar</label>
+                    <button
+                      type="button"
+                      className={`hogar-dropdown-trigger ${
+                        isHogarDropdownOpen ? 'is-open' : ''
+                      }`}
+                      onClick={() => setIsHogarDropdownOpen((v) => !v)}
+                      title="Categorías de Gastos del Hogar con presupuesto mensual asignado"
+                    >
+                      <span className="hogar-dropdown-current">
+                        {activeHogarCat ? (
+                          <>
+                            <HogarCategoryIcon
+                              iconKey={activeHogarCat.iconKey}
+                              size={15}
+                              color={activeHogarCat.color}
+                            />
+                            <span>{activeHogarCat.name}</span>
+                          </>
+                        ) : (
+                          <>
+                            <Home size={15} className="text-cyan" />
+                            <span>General del hogar</span>
+                          </>
+                        )}
+                      </span>
+                      <ChevronDown size={15} style={{ opacity: 0.75, flexShrink: 0 }} />
+                    </button>
+
+                    {isHogarDropdownOpen && (
+                      <div className="hogar-dropdown-menu">
+                        {budgetedHogarOptions.length > 0 ? (
+                          <>
+                            <div className="hogar-dropdown-caption">
+                              Categorías con gasto mensual asignado ({budgetedHogarOptions.length})
+                            </div>
+                            {budgetedHogarOptions.map((opt) => {
+                              const isSel = hogarCategoryId === opt.cat.id;
+                              return (
+                                <button
+                                  key={opt.cat.id}
+                                  type="button"
+                                  className={`hogar-dropdown-option ${isSel ? 'selected' : ''}`}
+                                  onClick={() => handleSelectHogarCatInComposer(opt.cat)}
+                                >
+                                  <span className="hogar-dropdown-opt-left">
+                                    <span
+                                      className="hogar-dropdown-icon-dot"
+                                      style={{ borderColor: opt.cat.color }}
+                                    >
+                                      <HogarCategoryIcon
+                                        iconKey={opt.cat.iconKey}
+                                        size={14}
+                                        color={opt.cat.color}
+                                      />
+                                    </span>
+                                    <span>{opt.cat.name}</span>
+                                  </span>
+                                  <span
+                                    className={`mono hogar-dropdown-opt-rem ${
+                                      opt.remaining < 0 ? 'text-magenta' : 'text-emerald'
+                                    }`}
+                                  >
+                                    {formatMoney(opt.remaining, currencySymbol)}
+                                  </span>
+                                </button>
+                              );
+                            })}
+                          </>
+                        ) : (
+                          <div className="hogar-dropdown-empty">
+                            Sin categorías específicas asignadas este mes en División en Sobres.
+                          </div>
+                        )}
+
+                        <div className="hogar-dropdown-divider" />
+
+                        <button
+                          type="button"
+                          className={`hogar-dropdown-option ${
+                            hogarCategoryId === '' ? 'selected' : ''
+                          }`}
+                          onClick={() => handleSelectHogarCatInComposer(null)}
+                        >
+                          <span className="hogar-dropdown-opt-left">
+                            <span className="hogar-dropdown-icon-dot">
+                              <Home size={14} className="text-cyan" />
+                            </span>
+                            <span>General / Otros del hogar</span>
+                          </span>
+                          <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+                            Sobre global
+                          </span>
+                        </button>
+
+                        <button
+                          type="button"
+                          className="hogar-dropdown-manage-btn"
+                          onClick={() => {
+                            setIsHogarDropdownOpen(false);
+                            onNavigateTab('envelopes');
+                          }}
+                        >
+                          <Layers size={13} /> Asignar / editar categorías en Sobres →
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                ) : entryMode === 'expense' && division === 'inversiones' ? (
                   <div>
                     <label className="field-label">¿Cuál Inversión?</label>
                     {investments.length > 0 ? (
@@ -891,82 +1077,47 @@ export const LedgerTab: React.FC<LedgerTabProps> = ({
                   </button>
                 </div>
               </div>
-
-              {/* "MIS GASTOS" STYLE ICON SELECTOR FOR GASTOS DEL HOGAR */}
-              {entryMode === 'expense' && division === 'hogar' && showHogarGrid && (
-                <div
-                  style={{
-                    marginTop: '14px',
-                    paddingTop: '12px',
-                    borderTop: '1px solid var(--border-subtle)',
-                  }}
-                >
-                  <div
-                    style={{
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      alignItems: 'center',
-                      marginBottom: '10px',
-                    }}
-                  >
-                    <span className="field-label" style={{ marginBottom: 0 }}>
-                      Categoría de Gastos del Hogar:{' '}
-                      <strong style={{ color: activeHogarCat?.color || 'var(--neon-cyan)' }}>
-                        {activeHogarCat?.name || 'General'}
-                      </strong>
-                    </span>
-                    <button
-                      type="button"
-                      className="btn btn-sm btn-ghost"
-                      style={{ padding: '3px 8px', fontSize: '0.72rem' }}
-                      onClick={() => onNavigateTab('envelopes')}
-                    >
-                      + Personalizar íconos en Sobres
-                    </button>
-                  </div>
-
-                  <div className="mis-gastos-grid compact">
-                    {allHogarCategories.map((cat) => {
-                      const isSelected = hogarCategoryId === cat.id;
-                      return (
-                        <button
-                          key={cat.id}
-                          type="button"
-                          className={`mis-gastos-item ${isSelected ? 'selected' : ''}`}
-                          onClick={() => handleSelectHogarCatInComposer(cat)}
-                          style={
-                            isSelected
-                              ? ({ '--cat-accent': cat.color } as React.CSSProperties)
-                              : undefined
-                          }
-                        >
-                          <div className="mis-gastos-circle">
-                            <HogarCategoryIcon
-                              iconKey={cat.iconKey}
-                              size={18}
-                              color={isSelected ? cat.color : undefined}
-                            />
-                          </div>
-                          <span className="mis-gastos-label">{cat.name}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
             </div>
           )}
 
           {showNoteField && (
-            <div style={{ marginTop: '12px' }}>
-              <label className="field-label">Nota adicional</label>
-              <input
-                type="text"
-                className="neon-input"
-                placeholder="Detalle opcional..."
-                value={note}
-                onChange={(e) => setNote(e.target.value)}
-              />
+            <div
+              style={{
+                marginTop: '12px',
+                display: 'grid',
+                gridTemplateColumns:
+                  entryMode === 'expense' && (division === 'hogar' || division === 'inversiones')
+                    ? '2fr 1fr'
+                    : '1fr',
+                gap: '12px',
+              }}
+            >
+              <div>
+                <label className="field-label">Nota adicional</label>
+                <input
+                  type="text"
+                  className="neon-input"
+                  placeholder="Detalle opcional..."
+                  value={note}
+                  onChange={(e) => setNote(e.target.value)}
+                />
+              </div>
+              {entryMode === 'expense' && (division === 'hogar' || division === 'inversiones') && (
+                <div>
+                  <label className="field-label">Pilar Kakeibo</label>
+                  <select
+                    className="neon-select"
+                    value={pillar}
+                    onChange={(e) => setPillar(e.target.value as KakeiboPillar)}
+                  >
+                    <option value="supervivencia">必需 · Necesidad / Supervivencia</option>
+                    <option value="opcional">娯楽 · Gusto / Opcional</option>
+                    <option value="cultura">教養 · Cultura / Salud / Mejora</option>
+                    <option value="patrimonio">資産 · Patrimonio / Deuda</option>
+                    <option value="imprevisto">特別 · Extra / Imprevisto</option>
+                  </select>
+                </div>
+              )}
             </div>
           )}
         </form>
@@ -1600,12 +1751,23 @@ export const LedgerTab: React.FC<LedgerTabProps> = ({
                         value={editHogarCategoryId}
                         onChange={(e) => setEditHogarCategoryId(e.target.value)}
                       >
-                        <option value="">General del hogar</option>
-                        {allHogarCategories.map((cat) => (
-                          <option key={cat.id} value={cat.id}>
-                            {cat.name}
+                        <option value="">General / Otros del hogar</option>
+                        {budgetedHogarOptions.map((opt) => (
+                          <option key={opt.cat.id} value={opt.cat.id}>
+                            {opt.cat.name}
                           </option>
                         ))}
+                        {editHogarCategoryId &&
+                          !budgetedHogarOptions.some((o) => o.cat.id === editHogarCategoryId) &&
+                          (() => {
+                            const extra = findHogarCategory(
+                              editHogarCategoryId,
+                              customHogarCategories
+                            );
+                            return extra ? (
+                              <option value={extra.id}>{extra.name} (sin presupuesto mes)</option>
+                            ) : null;
+                          })()}
                       </select>
                     </div>
                   ) : editDivision === 'inversiones' ? (

@@ -17,7 +17,9 @@ No necesitas instalar Node.js, ni Python, ni abrir ninguna consola:
 * **Automáticamente en tu PC:** Todos tus meses, monedas, salarios, inversiones y movimientos se guardan al instante en:
   `C:\Users\<TuUsuario>\AppData\Local\NeonKakeibo\kakeibo-store.json` (con respaldo automático `.bak.json`).
 * **Modo Portable (USB):** Si creas una carpeta llamada `datos_portables` justo al lado de `NeonKakeibo.exe`, el programa guardará todos tus datos dentro de esa carpeta para que puedas llevarlo en una memoria USB.
-* Dentro de **Historial Día 1 y Respaldo** tienes un botón **"Abrir carpeta de datos"** y exportación directa a **Excel (`.CSV`)** o respaldo **`.JSON`**.
+* Dentro de **Historial y Respaldo** tienes:
+  * **Salva Automática Programada en Segundo Plano (`--silent-backup`):** Elige frecuencia (*semanal, mensual o diaria*), hora, carpeta/partición/USB de destino y rotación de copias. Se ejecuta sola mediante el **Programador de Tareas de Windows** sin abrir ninguna ventana ni consumir RAM, y si la PC estaba apagada ese día, crea la salva pendiente apenas enciendas Windows.
+  * Botón **"Abrir carpeta de datos"** y exportación manual directa a **Excel (`.CSV`)** o respaldo **`.JSON`**.
 
 ---
 

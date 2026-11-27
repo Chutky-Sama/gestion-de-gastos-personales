@@ -1,13 +1,18 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Archive,
   Calendar,
+  Check,
+  Clock,
   Download,
   ExternalLink,
   FileSpreadsheet,
   FolderOpen,
+  HardDrive,
   History,
   LogOut,
+  Play,
+  Power,
   ShieldCheck,
   Sparkles,
   Upload,
@@ -18,14 +23,29 @@ import {
   formatMonthLabel,
 } from '../../shared/calculations';
 import { canExitDemoReset, canStartDemo } from '../../shared/ledgerCore';
-import { AppDatabase, CurrencyLedgerWorkspace } from '../../shared/types';
-import { DesktopInfo } from '../api';
+import {
+  AppDatabase,
+  AutoBackupConfig,
+  BackupFrequency,
+  CurrencyLedgerWorkspace,
+} from '../../shared/types';
+import { DesktopInfo, api } from '../api';
 import {
   exportAllEntriesAsCsv,
   exportDatabaseAsJson,
   formatFullDateTime,
   formatMoney,
 } from '../utils/format';
+
+const WEEKDAY_NAMES: Record<number, string> = {
+  1: 'Lunes',
+  2: 'Martes',
+  3: 'Miércoles',
+  4: 'Jueves',
+  5: 'Viernes',
+  6: 'Sábado',
+  7: 'Domingo',
+};
 
 interface HistoryTabProps {
   db: AppDatabase;
@@ -93,6 +113,80 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
 
   const demoAvailable = canStartDemo(db);
   const exitDemoAvailable = canExitDemoReset(db);
+
+  // Scheduled Silent Auto-Backup state
+  const [backupCfg, setBackupCfg] = useState<AutoBackupConfig | null>(null);
+  const [savingBackupCfg, setSavingBackupCfg] = useState(false);
+  const [runningManualBackup, setRunningManualBackup] = useState(false);
+  const [backupFeedback, setBackupFeedback] = useState<string | null>(null);
+
+  const showBackupFeedback = useCallback((msg: string) => {
+    setBackupFeedback(msg);
+    window.setTimeout(() => {
+      setBackupFeedback((prev) => (prev === msg ? null : prev));
+    }, 4200);
+  }, []);
+
+  useEffect(() => {
+    api
+      .getBackupConfig()
+      .then((cfg) => setBackupCfg(cfg))
+      .catch(() => {});
+  }, []);
+
+  const handleSaveBackupCfg = async (override?: Partial<AutoBackupConfig>) => {
+    if (!backupCfg) return;
+    setSavingBackupCfg(true);
+    try {
+      const merged: Partial<AutoBackupConfig> = {
+        ...backupCfg,
+        ...override,
+      };
+      const saved = await api.saveBackupConfig(merged);
+      setBackupCfg(saved);
+      showBackupFeedback(
+        saved.enabled
+          ? 'Salva automática programada y registrada en Windows (segundo plano silencioso).'
+          : 'Salva automática en segundo plano desactivada limpiamente.'
+      );
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : 'Error guardando la programación de salvas.');
+    } finally {
+      setSavingBackupCfg(false);
+    }
+  };
+
+  const handlePickFolder = async () => {
+    if (!backupCfg) return;
+    try {
+      const res = await api.pickBackupFolder();
+      if (!res.cancelled && res.path) {
+        setBackupCfg({ ...backupCfg, targetDir: res.path });
+      }
+    } catch {
+      // ignore
+    }
+  };
+
+  const handleRunBackupNow = async () => {
+    if (!backupCfg) return;
+    setRunningManualBackup(true);
+    try {
+      // Persist current folder/maxBackups first so run-now uses what's shown on screen
+      await api.saveBackupConfig(backupCfg);
+      const res = await api.runBackupNow();
+      setBackupCfg(res.config);
+      showBackupFeedback(
+        res.filePath
+          ? `Salva creada con éxito: ${res.filePath}`
+          : 'Salva creada correctamente en la carpeta configurada.'
+      );
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : 'No se pudo crear la salva en esa carpeta.');
+    } finally {
+      setRunningManualBackup(false);
+    }
+  };
 
   const handleFileImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -262,6 +356,358 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Scheduled Silent Background Auto-Backup Card */}
+      {backupCfg && (
+        <div
+          className={`neon-card ${backupCfg.enabled ? 'card-cyan' : ''}`}
+          style={{ marginBottom: '20px' }}
+        >
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'flex-start',
+              gap: '14px',
+              flexWrap: 'wrap',
+            }}
+          >
+            <div>
+              <div
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  fontSize: '0.79rem',
+                  fontWeight: 700,
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.06em',
+                  color: backupCfg.enabled ? 'var(--neon-cyan)' : 'var(--text-secondary)',
+                  marginBottom: '4px',
+                }}
+              >
+                <HardDrive size={16} /> Salva Automática en Segundo Plano (Sin Abrir el Programa)
+              </div>
+              <h3 style={{ margin: '0 0 4px', fontSize: '1.08rem' }}>
+                {backupCfg.enabled
+                  ? backupCfg.frequency === 'weekly'
+                    ? `Activa · Cada ${WEEKDAY_NAMES[backupCfg.dayOfWeek] || 'Sábado'} a las ${String(
+                        backupCfg.hour
+                      ).padStart(2, '0')}:${String(backupCfg.minute).padStart(2, '0')}`
+                    : backupCfg.frequency === 'monthly'
+                    ? `Activa · Día ${backupCfg.dayOfMonth} de cada mes a las ${String(
+                        backupCfg.hour
+                      ).padStart(2, '0')}:${String(backupCfg.minute).padStart(2, '0')}`
+                    : `Activa · Todos los días a las ${String(backupCfg.hour).padStart(
+                        2,
+                        '0'
+                      )}:${String(backupCfg.minute).padStart(2, '0')}`
+                  : 'Desactivada actualmente'}
+              </h3>
+              <p style={{ margin: 0, fontSize: '0.82rem', color: 'var(--text-secondary)' }}>
+                Se ejecuta en modo invisible (0 MB de RAM en reposo) mediante el Programador de
+                Tareas de Windows. Si la PC estaba apagada ese día, crea la salva pendiente sola al
+                encender el equipo.
+              </p>
+            </div>
+
+            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+              <button
+                type="button"
+                disabled={savingBackupCfg}
+                className={`btn btn-sm ${backupCfg.enabled ? 'btn-magenta' : 'btn-emerald'}`}
+                onClick={() => handleSaveBackupCfg({ enabled: !backupCfg.enabled })}
+              >
+                <Power size={14} />
+                {backupCfg.enabled ? 'Desactivar Salva Automática' : 'Activar Salva Automática'}
+              </button>
+
+              <button
+                type="button"
+                disabled={runningManualBackup}
+                className="btn btn-sm btn-cyan"
+                onClick={handleRunBackupNow}
+                title="Genera inmediatamente una salva fechada en la carpeta elegida para verificar que todo funciona"
+              >
+                <Play size={14} />
+                {runningManualBackup ? 'Creando salva...' : 'Crear Salva Ahora'}
+              </button>
+            </div>
+          </div>
+
+          <div className="autobackup-grid">
+            <div>
+              <label className="field-label">Frecuencia</label>
+              <select
+                className="neon-select"
+                value={backupCfg.frequency}
+                onChange={(e) =>
+                  setBackupCfg({
+                    ...backupCfg,
+                    frequency: e.target.value as BackupFrequency,
+                  })
+                }
+              >
+                <option value="weekly">Semanal (día fijo de la semana)</option>
+                <option value="monthly">Mensual (día específico del mes)</option>
+                <option value="daily">Diaria (todos los días)</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="field-label">
+                {backupCfg.frequency === 'weekly'
+                  ? 'Día de la semana'
+                  : backupCfg.frequency === 'monthly'
+                  ? 'Día del mes (1 al 28)'
+                  : 'Día'}
+              </label>
+              {backupCfg.frequency === 'weekly' ? (
+                <select
+                  className="neon-select"
+                  value={backupCfg.dayOfWeek}
+                  onChange={(e) =>
+                    setBackupCfg({ ...backupCfg, dayOfWeek: Number(e.target.value) })
+                  }
+                >
+                  {[1, 2, 3, 4, 5, 6, 7].map((d) => (
+                    <option key={d} value={d}>
+                      Cada {WEEKDAY_NAMES[d]}
+                    </option>
+                  ))}
+                </select>
+              ) : backupCfg.frequency === 'monthly' ? (
+                <select
+                  className="neon-select"
+                  value={backupCfg.dayOfMonth}
+                  onChange={(e) =>
+                    setBackupCfg({ ...backupCfg, dayOfMonth: Number(e.target.value) })
+                  }
+                >
+                  {Array.from({ length: 28 }, (_, idx) => idx + 1).map((d) => (
+                    <option key={d} value={d}>
+                      Día {d} de cada mes
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  type="text"
+                  disabled
+                  className="neon-input"
+                  value="Todos los días"
+                />
+              )}
+            </div>
+
+            <div>
+              <label className="field-label">Hora programada</label>
+              <input
+                type="time"
+                className="neon-input mono-input"
+                value={`${String(backupCfg.hour).padStart(2, '0')}:${String(
+                  backupCfg.minute
+                ).padStart(2, '0')}`}
+                onChange={(e) => {
+                  const [hh, mm] = (e.target.value || '20:00').split(':').map(Number);
+                  setBackupCfg({
+                    ...backupCfg,
+                    hour: Number.isFinite(hh) ? hh : 20,
+                    minute: Number.isFinite(mm) ? mm : 0,
+                  });
+                }}
+              />
+            </div>
+
+            <div>
+              <label className="field-label">Rotación de copias</label>
+              <select
+                className="neon-select"
+                value={backupCfg.maxBackups}
+                onChange={(e) =>
+                  setBackupCfg({ ...backupCfg, maxBackups: Number(e.target.value) })
+                }
+              >
+                <option value={5}>Conservar últimas 5 salvas</option>
+                <option value={12}>Conservar últimas 12 salvas</option>
+                <option value={24}>Conservar últimas 24 salvas</option>
+                <option value={50}>Conservar últimas 50 salvas</option>
+              </select>
+            </div>
+          </div>
+
+          {/* Target Folder Row */}
+          <div style={{ marginTop: '12px' }}>
+            <label className="field-label">
+              Carpeta de destino (recomendado: otra partición como D:\ o memoria USB)
+            </label>
+            <div className="autobackup-folder-row">
+              <input
+                type="text"
+                className="neon-input mono-input"
+                style={{ flex: '1 1 320px' }}
+                placeholder="Ej. D:\Mis Salvas Kakeibo"
+                value={backupCfg.targetDir}
+                onChange={(e) => setBackupCfg({ ...backupCfg, targetDir: e.target.value })}
+              />
+              {desktopInfo.isDesktop && (
+                <>
+                  <button
+                    type="button"
+                    className="btn btn-sm btn-violet"
+                    onClick={handlePickFolder}
+                  >
+                    <FolderOpen size={14} /> Elegir carpeta en Windows...
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-sm btn-ghost"
+                    onClick={() => api.openBackupFolder()}
+                  >
+                    <ExternalLink size={14} /> Abrir carpeta
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+
+          {/* Catch-up checkbox + Save button */}
+          <div
+            style={{
+              marginTop: '14px',
+              paddingTop: '12px',
+              borderTop: '1px solid var(--border-subtle)',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              gap: '12px',
+              flexWrap: 'wrap',
+            }}
+          >
+            <label
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '8px',
+                fontSize: '0.82rem',
+                color: 'var(--text-primary)',
+                cursor: 'pointer',
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={backupCfg.runOnStartupIfMissed}
+                onChange={(e) =>
+                  setBackupCfg({ ...backupCfg, runOnStartupIfMissed: e.target.checked })
+                }
+              />
+              <span>
+                Si la PC estaba apagada ese día, crear la salva pendiente automáticamente apenas
+                se encienda Windows
+              </span>
+            </label>
+
+            <button
+              type="button"
+              disabled={savingBackupCfg}
+              className="btn btn-sm btn-emerald"
+              onClick={() => handleSaveBackupCfg()}
+            >
+              <Check size={14} />
+              {savingBackupCfg ? 'Guardando...' : 'Guardar Ajustes de Salva'}
+            </button>
+          </div>
+
+          {/* Status & Recent Backups Strip */}
+          <div
+            style={{
+              marginTop: '12px',
+              padding: '10px 12px',
+              borderRadius: '9px',
+              background: 'rgba(8, 12, 23, 0.78)',
+              border: '1px solid var(--border-subtle)',
+              fontSize: '0.79rem',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '6px',
+            }}
+          >
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                flexWrap: 'wrap',
+                gap: '8px',
+              }}
+            >
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                <Clock size={14} className="text-cyan" />
+                <strong>Última salva creada:</strong>{' '}
+                {backupCfg.lastBackupAt ? (
+                  <span className="mono text-emerald">{backupCfg.lastBackupAt}</span>
+                ) : (
+                  <span style={{ color: 'var(--text-muted)' }}>Ninguna todavía</span>
+                )}
+              </span>
+
+              {backupCfg.recentBackups && backupCfg.recentBackups.length > 0 && (
+                <span className="mono" style={{ color: 'var(--text-secondary)' }}>
+                  Copias guardadas en carpeta: <strong>{backupCfg.recentBackups.length}</strong> /{' '}
+                  {backupCfg.maxBackups}
+                </span>
+              )}
+            </div>
+
+            {backupCfg.lastBackupFile && (
+              <div className="mono" style={{ fontSize: '0.74rem', color: 'var(--text-secondary)' }}>
+                Archivo más reciente: {backupCfg.lastBackupFile}
+              </div>
+            )}
+
+            {backupCfg.lastError && (
+              <div className="text-magenta" style={{ fontSize: '0.76rem' }}>
+                Aviso en último intento: {backupCfg.lastError}
+              </div>
+            )}
+
+            {backupFeedback && (
+              <div
+                className="text-emerald"
+                style={{ fontWeight: 700, fontSize: '0.8rem', marginTop: '2px' }}
+              >
+                ✓ {backupFeedback}
+              </div>
+            )}
+
+            {backupCfg.recentBackups && backupCfg.recentBackups.length > 0 && (
+              <div
+                style={{
+                  display: 'flex',
+                  gap: '6px',
+                  flexWrap: 'wrap',
+                  marginTop: '4px',
+                }}
+              >
+                {backupCfg.recentBackups.slice(0, 4).map((bf) => (
+                  <span
+                    key={bf.fileName}
+                    className="div-badge"
+                    style={{
+                      background: 'rgba(0, 240, 255, 0.08)',
+                      border: '1px solid rgba(0, 240, 255, 0.25)',
+                      color: 'var(--text-primary)',
+                      fontSize: '0.7rem',
+                    }}
+                  >
+                    {bf.fileName} ({Math.max(1, Math.round(bf.sizeBytes / 1024))} KB)
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Lifetime KPIs for active currency */}
       <div

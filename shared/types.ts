@@ -234,3 +234,30 @@ export interface AppDatabase {
   exchangeControl: ExchangeControlState;
   historyLog: HistoricalEvent[];
 }
+
+export type BackupFrequency = 'daily' | 'weekly' | 'monthly';
+
+export interface BackupFileEntry {
+  fileName: string;
+  sizeBytes: number;
+  modifiedAt: string;
+}
+
+export interface AutoBackupConfig {
+  enabled: boolean;
+  frequency: BackupFrequency;
+  dayOfWeek: number; // 1 = Lunes ... 7 = Domingo
+  dayOfMonth: number; // 1 .. 28
+  hour: number; // 0 .. 23
+  minute: number; // 0 .. 59
+  targetDir: string;
+  maxBackups: number; // ej. 5, 12, 24, 50
+  runOnStartupIfMissed: boolean;
+  lastBackupAt?: string;
+  lastBackupFile?: string;
+  lastError?: string;
+  registeredExePath?: string;
+  taskRegistered?: boolean;
+  recentBackups?: BackupFileEntry[];
+}
+
