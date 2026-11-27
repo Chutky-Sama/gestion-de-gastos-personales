@@ -33,7 +33,7 @@ $ZIG_CMD cc -target x86_64-windows-gnu -Os -s \
   -Wl,--subsystem,windows \
   desktop/neon_kakeibo_win32.c \
   desktop/neon_kakeibo.res \
-  -lws2_32 -lshell32 -lshlwapi -ladvapi32 -luser32 \
+  -lws2_32 -lshell32 -lshlwapi -ladvapi32 -luser32 -lole32 \
   -o NeonKakeibo.exe
 
 ls -lh NeonKakeibo.exe

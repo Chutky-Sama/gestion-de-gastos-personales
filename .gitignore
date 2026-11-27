@@ -4,6 +4,7 @@ dist/
 *.log
 data/*.json
 data/*.bak
+data/respaldos_automaticos/
 desktop/embedded_assets.h
 desktop/*.res
 .DS_Store

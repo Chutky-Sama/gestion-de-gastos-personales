@@ -1,6 +1,7 @@
 import { HogarCategoryDef } from '../shared/hogarCategories';
 import {
   AppDatabase,
+  AutoBackupConfig,
   EntryType,
   InvestmentCategory,
   KakeiboPillar,
@@ -92,11 +93,76 @@ async function requestJson<T>(url: string, options?: RequestInit): Promise<T> {
   return data;
 }
 
+async function requestRawJson<T>(url: string, options?: RequestInit): Promise<T> {
+  const res = await fetch(url, {
+    headers: { 'Content-Type': 'application/json' },
+    ...options,
+  });
+
+  if (!res.ok) {
+    let errMsg = `Error HTTP ${res.status}`;
+    try {
+      const body = await res.json();
+      if (body?.error) errMsg = body.error;
+    } catch {
+      // ignore
+    }
+    throw new Error(errMsg);
+  }
+
+  return (await res.json()) as T;
+}
+
 export const api = {
   getDesktopInfo,
 
   openDataFolder: async (): Promise<void> => {
     await fetch('/api/desktop/open-folder', { method: 'POST' });
+  },
+
+  getBackupConfig: async (): Promise<AutoBackupConfig> => {
+    const info = await getDesktopInfo();
+    const url = info.isDesktop ? '/api/desktop/backup/config' : '/api/backup/config';
+    return requestRawJson<AutoBackupConfig>(url);
+  },
+
+  saveBackupConfig: async (payload: Partial<AutoBackupConfig>): Promise<AutoBackupConfig> => {
+    const info = await getDesktopInfo();
+    const url = info.isDesktop ? '/api/desktop/backup/config' : '/api/backup/config';
+    return requestRawJson<AutoBackupConfig>(url, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  },
+
+  pickBackupFolder: async (): Promise<{ cancelled: boolean; path?: string }> => {
+    const info = await getDesktopInfo();
+    if (!info.isDesktop) {
+      return { cancelled: true };
+    }
+    return requestRawJson<{ cancelled: boolean; path?: string }>(
+      '/api/desktop/backup/pick-folder',
+      { method: 'POST' }
+    );
+  },
+
+  runBackupNow: async (): Promise<{
+    ok: boolean;
+    filePath?: string;
+    config: AutoBackupConfig;
+  }> => {
+    const info = await getDesktopInfo();
+    const url = info.isDesktop ? '/api/desktop/backup/run-now' : '/api/backup/run-now';
+    return requestRawJson<{ ok: boolean; filePath?: string; config: AutoBackupConfig }>(url, {
+      method: 'POST',
+    });
+  },
+
+  openBackupFolder: async (): Promise<void> => {
+    const info = await getDesktopInfo();
+    if (info.isDesktop) {
+      await fetch('/api/desktop/backup/open-folder', { method: 'POST' });
+    }
   },
 
   getState: async () => {
