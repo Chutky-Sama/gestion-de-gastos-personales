@@ -1,10 +1,14 @@
 import {
+  DEFAULT_EXPECTED_ROI_PCT,
+  DEFAULT_RISK_DRAWDOWN_PCT,
   computeAllTimeInvestmentTotals,
   computeMonthSummary,
   formatMonthLabel,
   getCurrentMonthKey,
   getTodayDateString,
   hasRealUserData,
+  inferDefaultLiquidityByCategory,
+  inferDefaultRiskByCategory,
   resolveMonthOpeningSplits,
   round2,
 } from './calculations';
@@ -18,6 +22,10 @@ import {
   HistoricalEvent,
   InvestmentCategory,
   InvestmentDefinition,
+  InvestmentEventKind,
+  InvestmentEventRecord,
+  InvestmentLiquidity,
+  InvestmentRiskLevel,
   KakeiboPillar,
   LedgerEntry,
   ManualCurrencyRate,
@@ -799,6 +807,15 @@ export function applyAddEntry(
   month.entries.push(entry);
   month.updatedAt = new Date().toISOString();
 
+  if (entry.type === 'expense' && entry.division === 'inversiones' && entry.investmentId) {
+    const targetInv = ws.investments.find((i) => i.id === entry.investmentId);
+    if (targetInv && targetInv.currentEstimatedValue !== undefined) {
+      targetInv.currentEstimatedValue = round2(
+        Math.max(0, Number(targetInv.currentEstimatedValue) || 0) + numericAmount
+      );
+    }
+  }
+
   if (isTraspaso) {
     const dirLabel =
       entry.transferDirection === 'cash_to_transf'
@@ -899,8 +916,24 @@ export function applyDeleteEntry(db: AppDatabase, monthKey: string, entryId: str
 
   lockDemoIfRealMutation(db);
 
+  const removed = month.entries.find((e) => e.id === entryId);
   month.entries = month.entries.filter((e) => e.id !== entryId);
   month.updatedAt = new Date().toISOString();
+
+  if (
+    removed &&
+    removed.type === 'expense' &&
+    removed.division === 'inversiones' &&
+    removed.investmentId
+  ) {
+    const targetInv = ws.investments.find((i) => i.id === removed.investmentId);
+    if (targetInv && targetInv.currentEstimatedValue !== undefined) {
+      targetInv.currentEstimatedValue = round2(
+        Math.max(0, (Number(targetInv.currentEstimatedValue) || 0) - removed.amount)
+      );
+    }
+  }
+
   return syncActiveWorkspaceMirrors(db);
 }
 
@@ -1004,6 +1037,10 @@ export function applyCreateInvestment(
     monthlyTarget: number;
     platform?: string;
     notes?: string;
+    riskLevel?: InvestmentRiskLevel;
+    liquidity?: InvestmentLiquidity;
+    expectedRoiPercent?: number;
+    maxAcceptableLossPercent?: number;
     monthKey?: string;
   }
 ): AppDatabase {
@@ -1012,16 +1049,33 @@ export function applyCreateInvestment(
 
   lockDemoIfRealMutation(db);
 
+  const cat = payload.category || 'otro';
+  const riskLevel = payload.riskLevel || inferDefaultRiskByCategory(cat);
+  const liquidity = payload.liquidity || inferDefaultLiquidityByCategory(cat);
+  const expectedRoiPercent =
+    payload.expectedRoiPercent !== undefined
+      ? round2(Math.max(0, Number(payload.expectedRoiPercent) || 0))
+      : DEFAULT_EXPECTED_ROI_PCT[riskLevel];
+  const maxAcceptableLossPercent =
+    payload.maxAcceptableLossPercent !== undefined
+      ? round2(Math.max(0, Number(payload.maxAcceptableLossPercent) || 0))
+      : DEFAULT_RISK_DRAWDOWN_PCT[riskLevel];
+
   const target = round2(Math.max(0, Number(payload.monthlyTarget) || 0));
   const inv: InvestmentDefinition = {
     id: generateId(),
     name: payload.name.trim(),
-    category: payload.category || 'otro',
+    category: cat,
     monthlyTarget: target,
     platform: payload.platform?.trim() || undefined,
     notes: payload.notes?.trim() || undefined,
     active: true,
     createdAt: new Date().toISOString(),
+    riskLevel,
+    liquidity,
+    expectedRoiPercent,
+    maxAcceptableLossPercent,
+    events: [],
   };
 
   ws.investments.push(inv);
@@ -1035,7 +1089,7 @@ export function applyCreateInvestment(
     currencyCode: ws.currencyCode,
     eventType: 'investment_created',
     title: `Nueva inversión (${ws.currencyCode}): ${inv.name}`,
-    detail: `Meta mensual: ${ws.currencySymbol}${target.toFixed(2)}${inv.platform ? ` · ${inv.platform}` : ''}`,
+    detail: `Meta mensual: ${ws.currencySymbol}${target.toFixed(2)} · Riesgo ${riskLevel} · Meta retorno ${expectedRoiPercent}%`,
     amount: target,
   });
 
@@ -1051,6 +1105,11 @@ export function applyUpdateInvestment(
     monthlyTarget?: number;
     platform?: string;
     notes?: string;
+    riskLevel?: InvestmentRiskLevel;
+    liquidity?: InvestmentLiquidity;
+    expectedRoiPercent?: number;
+    maxAcceptableLossPercent?: number;
+    currentEstimatedValue?: number | null;
     active?: boolean;
     monthKey?: string;
   }
@@ -1074,11 +1133,183 @@ export function applyUpdateInvestment(
   }
   if (payload.platform !== undefined) inv.platform = payload.platform.trim() || undefined;
   if (payload.notes !== undefined) inv.notes = payload.notes.trim() || undefined;
+  if (payload.riskLevel) inv.riskLevel = payload.riskLevel;
+  if (payload.liquidity) inv.liquidity = payload.liquidity;
+  if (payload.expectedRoiPercent !== undefined) {
+    inv.expectedRoiPercent = round2(Math.max(0, Number(payload.expectedRoiPercent) || 0));
+  }
+  if (payload.maxAcceptableLossPercent !== undefined) {
+    inv.maxAcceptableLossPercent = round2(
+      Math.max(0, Number(payload.maxAcceptableLossPercent) || 0)
+    );
+  }
+  if (payload.currentEstimatedValue !== undefined) {
+    if (payload.currentEstimatedValue === null) {
+      delete inv.currentEstimatedValue;
+    } else {
+      inv.currentEstimatedValue = round2(Math.max(0, Number(payload.currentEstimatedValue) || 0));
+    }
+  }
   if (typeof payload.active === 'boolean') {
     inv.active = payload.active;
     if (payload.monthKey && ws.months[payload.monthKey] && !payload.active) {
       delete ws.months[payload.monthKey].allocations.investmentTargets[inv.id];
     }
+  }
+
+  return syncActiveWorkspaceMirrors(db);
+}
+
+export function applyRecordInvestmentEvent(
+  db: AppDatabase,
+  id: string,
+  payload: {
+    kind: InvestmentEventKind;
+    amount: number;
+    date?: string;
+    monthKey?: string;
+    paymentMethod?: PaymentMethod;
+    creditToLedger?: boolean;
+    note?: string;
+  }
+): AppDatabase {
+  const ws = db.currencyWorkspaces[db.profile.currencyCode];
+  const inv = ws.investments.find((i) => i.id === id);
+  if (!inv) throw new Error('Inversión no encontrada.');
+
+  const amt = round2(Math.max(0, Number(payload.amount) || 0));
+  if (payload.kind !== 'valuation_sync' && amt <= 0) {
+    throw new Error('El monto debe ser mayor que cero.');
+  }
+
+  lockDemoIfRealMutation(db);
+
+  const nowIso = new Date().toISOString();
+  const dateStr =
+    typeof payload.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(payload.date)
+      ? payload.date
+      : getTodayDateString();
+  const targetMk = payload.monthKey || dateStr.slice(0, 7) || getCurrentMonthKey();
+  const method: PaymentMethod =
+    payload.paymentMethod === 'transferencia' ? 'transferencia' : 'efectivo';
+
+  if (!Array.isArray(inv.events)) {
+    inv.events = [];
+  }
+
+  let linkedEntryId: string | undefined;
+  let linkedMonthKey: string | undefined;
+
+  if (
+    (payload.kind === 'return_payout' || payload.kind === 'capital_withdraw') &&
+    payload.creditToLedger
+  ) {
+    if (!ws.months[targetMk]) {
+      ws.months[targetMk] = createEmptyMonthCore(
+        targetMk,
+        ws.currentSalaryEfectivo,
+        ws.currentSalaryTransferencia,
+        ws.hasManutencionesDefault
+      );
+    }
+    const ledgerEntry: LedgerEntry = {
+      id: generateId(),
+      monthKey: targetMk,
+      date: dateStr,
+      createdAt: nowIso,
+      type: 'income',
+      amount: amt,
+      paymentMethod: method,
+      concept:
+        payload.kind === 'return_payout'
+          ? `Ganancia de inversión (${inv.name})${payload.note?.trim() ? ` · ${payload.note.trim()}` : ''}`
+          : `Recuperación de capital (${inv.name})${payload.note?.trim() ? ` · ${payload.note.trim()}` : ''}`,
+      division: 'general',
+      investmentId: inv.id,
+      pillar: 'ingreso',
+      note: payload.note?.trim() || undefined,
+    };
+    ws.months[targetMk].entries.push(ledgerEntry);
+    ws.months[targetMk].updatedAt = nowIso;
+    linkedEntryId = ledgerEntry.id;
+    linkedMonthKey = targetMk;
+  }
+
+  if (payload.kind === 'valuation_sync') {
+    inv.currentEstimatedValue = amt;
+  } else if (
+    (payload.kind === 'capital_withdraw' || payload.kind === 'loss_writeoff') &&
+    inv.currentEstimatedValue !== undefined
+  ) {
+    inv.currentEstimatedValue = round2(Math.max(0, inv.currentEstimatedValue - amt));
+  }
+
+  const evRec: InvestmentEventRecord = {
+    id: generateId(),
+    date: dateStr,
+    createdAt: nowIso,
+    kind: payload.kind,
+    amount: amt,
+    paymentMethod:
+      payload.kind === 'return_payout' || payload.kind === 'capital_withdraw'
+        ? method
+        : undefined,
+    creditedToLedger: Boolean(linkedEntryId),
+    linkedMonthKey,
+    linkedEntryId,
+    note: payload.note?.trim() || undefined,
+  };
+
+  inv.events.unshift(evRec);
+
+  const titleByKind: Record<InvestmentEventKind, string> = {
+    return_payout: `Ganancia cobrada en ${inv.name}: +${ws.currencySymbol}${amt.toFixed(2)}`,
+    capital_withdraw: `Capital recuperado de ${inv.name}: +${ws.currencySymbol}${amt.toFixed(2)}`,
+    loss_writeoff: `Pérdida / merma en ${inv.name}: -${ws.currencySymbol}${amt.toFixed(2)}`,
+    valuation_sync: `Valor actual actualizado en ${inv.name}: ${ws.currencySymbol}${amt.toFixed(2)}`,
+  };
+
+  appendHistoryCore(db, {
+    monthKey: targetMk,
+    currencyCode: ws.currencyCode,
+    eventType: 'investment_event',
+    title: titleByKind[payload.kind],
+    detail: payload.note?.trim() || `Registrado en cartera (${ws.currencyCode})`,
+    amount: payload.kind === 'loss_writeoff' ? -amt : amt,
+  });
+
+  return syncActiveWorkspaceMirrors(db);
+}
+
+export function applyDeleteInvestmentEvent(
+  db: AppDatabase,
+  id: string,
+  eventId: string
+): AppDatabase {
+  const ws = db.currencyWorkspaces[db.profile.currencyCode];
+  const inv = ws.investments.find((i) => i.id === id);
+  if (!inv || !Array.isArray(inv.events)) throw new Error('Evento no encontrado.');
+
+  const ev = inv.events.find((x) => x.id === eventId);
+  if (!ev) throw new Error('Evento no encontrado.');
+
+  lockDemoIfRealMutation(db);
+
+  inv.events = inv.events.filter((x) => x.id !== eventId);
+
+  if (ev.creditedToLedger && ev.linkedMonthKey && ev.linkedEntryId) {
+    const mRec = ws.months[ev.linkedMonthKey];
+    if (mRec) {
+      mRec.entries = mRec.entries.filter((e) => e.id !== ev.linkedEntryId);
+      mRec.updatedAt = new Date().toISOString();
+    }
+  }
+
+  if (
+    (ev.kind === 'capital_withdraw' || ev.kind === 'loss_writeoff') &&
+    inv.currentEstimatedValue !== undefined
+  ) {
+    inv.currentEstimatedValue = round2(inv.currentEstimatedValue + ev.amount);
   }
 
   return syncActiveWorkspaceMirrors(db);
@@ -1091,9 +1322,9 @@ export function applyDeleteInvestment(db: AppDatabase, id: string): AppDatabase 
 
   lockDemoIfRealMutation(db);
 
-  const hasEntries = Object.values(ws.months).some((m) =>
-    m.entries.some((e) => e.investmentId === id)
-  );
+  const hasEntries =
+    Object.values(ws.months).some((m) => m.entries.some((e) => e.investmentId === id)) ||
+    Boolean(inv.events && inv.events.length > 0);
 
   if (hasEntries) {
     inv.active = false;
@@ -1150,6 +1381,22 @@ export function applyStartOneTimeDemo(db: AppDatabase): AppDatabase {
         platform: 'Efectivo y Transfermóvil',
         active: true,
         createdAt: now,
+        riskLevel: 'alto',
+        liquidity: 'corto_plazo',
+        expectedRoiPercent: 25,
+        maxAcceptableLossPercent: 15,
+        events: [
+          {
+            id: generateId(),
+            date: today,
+            createdAt: now,
+            kind: 'return_payout',
+            amount: 650,
+            paymentMethod: 'efectivo',
+            creditedToLedger: false,
+            note: 'Primera tanda vendida con margen positivo',
+          },
+        ],
       },
       {
         id: invReservaId,
@@ -1159,6 +1406,11 @@ export function applyStartOneTimeDemo(db: AppDatabase): AppDatabase {
         platform: 'Ahorro mensual',
         active: true,
         createdAt: now,
+        riskLevel: 'bajo',
+        liquidity: 'inmediata',
+        expectedRoiPercent: 10,
+        maxAcceptableLossPercent: 5,
+        events: [],
       },
     ],
     months: {

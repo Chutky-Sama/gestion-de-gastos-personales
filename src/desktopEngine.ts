@@ -5,9 +5,11 @@ import {
   applyCreateInvestment,
   applyDeleteEntry,
   applyDeleteInvestment,
+  applyDeleteInvestmentEvent,
   applyEnsureMonth,
   applyExecuteCurrencyExchange,
   applyExitDemoReset,
+  applyRecordInvestmentEvent,
   applySelectCurrency,
   applyStartOneTimeDemo,
   applyUpdateEnabledCurrencies,
@@ -24,6 +26,9 @@ import {
   AppDatabase,
   EntryType,
   InvestmentCategory,
+  InvestmentEventKind,
+  InvestmentLiquidity,
+  InvestmentRiskLevel,
   KakeiboPillar,
   MonthAllocations,
   MonthReflection,
@@ -197,6 +202,10 @@ export const desktopEngine = {
     monthlyTarget: number;
     platform?: string;
     notes?: string;
+    riskLevel?: InvestmentRiskLevel;
+    liquidity?: InvestmentLiquidity;
+    expectedRoiPercent?: number;
+    maxAcceptableLossPercent?: number;
     monthKey?: string;
   }) => {
     const db = await loadDesktopDb();
@@ -211,12 +220,38 @@ export const desktopEngine = {
       monthlyTarget?: number;
       platform?: string;
       notes?: string;
+      riskLevel?: InvestmentRiskLevel;
+      liquidity?: InvestmentLiquidity;
+      expectedRoiPercent?: number;
+      maxAcceptableLossPercent?: number;
+      currentEstimatedValue?: number | null;
       active?: boolean;
       monthKey?: string;
     }
   ) => {
     const db = await loadDesktopDb();
     return saveDesktopDb(applyUpdateInvestment(db, id, payload));
+  },
+
+  recordInvestmentEvent: async (
+    id: string,
+    payload: {
+      kind: InvestmentEventKind;
+      amount: number;
+      date?: string;
+      monthKey?: string;
+      paymentMethod?: PaymentMethod;
+      creditToLedger?: boolean;
+      note?: string;
+    }
+  ) => {
+    const db = await loadDesktopDb();
+    return saveDesktopDb(applyRecordInvestmentEvent(db, id, payload));
+  },
+
+  deleteInvestmentEvent: async (id: string, eventId: string) => {
+    const db = await loadDesktopDb();
+    return saveDesktopDb(applyDeleteInvestmentEvent(db, id, eventId));
   },
 
   deleteInvestment: async (id: string) => {

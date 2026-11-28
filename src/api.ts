@@ -4,6 +4,9 @@ import {
   AutoBackupConfig,
   EntryType,
   InvestmentCategory,
+  InvestmentEventKind,
+  InvestmentLiquidity,
+  InvestmentRiskLevel,
   KakeiboPillar,
   MonthAllocations,
   MonthReflection,
@@ -328,6 +331,10 @@ export const api = {
     monthlyTarget: number;
     platform?: string;
     notes?: string;
+    riskLevel?: InvestmentRiskLevel;
+    liquidity?: InvestmentLiquidity;
+    expectedRoiPercent?: number;
+    maxAcceptableLossPercent?: number;
     monthKey?: string;
   }) => {
     const info = await getDesktopInfo();
@@ -346,6 +353,11 @@ export const api = {
       monthlyTarget?: number;
       platform?: string;
       notes?: string;
+      riskLevel?: InvestmentRiskLevel;
+      liquidity?: InvestmentLiquidity;
+      expectedRoiPercent?: number;
+      maxAcceptableLossPercent?: number;
+      currentEstimatedValue?: number | null;
       active?: boolean;
       monthKey?: string;
     }
@@ -355,6 +367,34 @@ export const api = {
     return requestJson<AppDatabase>(`/api/investments/${id}`, {
       method: 'PUT',
       body: JSON.stringify(payload),
+    });
+  },
+
+  recordInvestmentEvent: async (
+    id: string,
+    payload: {
+      kind: InvestmentEventKind;
+      amount: number;
+      date?: string;
+      monthKey?: string;
+      paymentMethod?: PaymentMethod;
+      creditToLedger?: boolean;
+      note?: string;
+    }
+  ) => {
+    const info = await getDesktopInfo();
+    if (info.isDesktop) return desktopEngine.recordInvestmentEvent(id, payload);
+    return requestJson<AppDatabase>(`/api/investments/${id}/events`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  },
+
+  deleteInvestmentEvent: async (id: string, eventId: string) => {
+    const info = await getDesktopInfo();
+    if (info.isDesktop) return desktopEngine.deleteInvestmentEvent(id, eventId);
+    return requestJson<AppDatabase>(`/api/investments/${id}/events/${eventId}`, {
+      method: 'DELETE',
     });
   },
 

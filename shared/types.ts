@@ -48,6 +48,33 @@ export interface SubItem {
   hogarCategoryId?: string;
 }
 
+export type InvestmentRiskLevel = 'bajo' | 'moderado' | 'alto' | 'especulativo';
+
+export type InvestmentLiquidity =
+  | 'inmediata'
+  | 'corto_plazo'
+  | 'mediano_plazo'
+  | 'largo_plazo';
+
+export type InvestmentEventKind =
+  | 'return_payout'    // (+) Ganancia / dividendo / venta cobrada
+  | 'capital_withdraw' // (+) Recuperación / retiro parcial o total de capital
+  | 'loss_writeoff'    // (-) Pérdida / merma / devaluación sufrida
+  | 'valuation_sync';  // (=) Actualización manual del valor actual estimado en juego
+
+export interface InvestmentEventRecord {
+  id: string;
+  date: string; // YYYY-MM-DD
+  createdAt: string;
+  kind: InvestmentEventKind;
+  amount: number;
+  paymentMethod?: PaymentMethod;
+  creditedToLedger?: boolean;
+  linkedMonthKey?: string;
+  linkedEntryId?: string;
+  note?: string;
+}
+
 export interface InvestmentDefinition {
   id: string;
   name: string;
@@ -57,6 +84,12 @@ export interface InvestmentDefinition {
   notes?: string;
   active: boolean;
   createdAt: string;
+  riskLevel?: InvestmentRiskLevel;
+  liquidity?: InvestmentLiquidity;
+  expectedRoiPercent?: number;
+  maxAcceptableLossPercent?: number;
+  currentEstimatedValue?: number; // Si es undefined, usa el valor en libros automático
+  events?: InvestmentEventRecord[];
 }
 
 export interface CustomEnvelope {
@@ -150,6 +183,7 @@ export interface HistoricalEvent {
     | 'month_opened'
     | 'investment_created'
     | 'investment_removed'
+    | 'investment_event'
     | 'balance_adjusted'
     | 'channel_transfer'
     | 'exchange_rate_updated'
