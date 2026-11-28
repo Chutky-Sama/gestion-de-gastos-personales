@@ -8,7 +8,7 @@ Sistema personal de gestión mensual de gastos e inversiones con estética **Cyb
 
 No necesitas instalar Node.js, ni Python, ni abrir ninguna consola:
 
-1. Descarga el archivo **`NeonKakeibo.exe`** directamente desde el repositorio (~1.05 MB, todo integrado en un solo ejecutable sin dependencias externas).
+1. Descarga el archivo **`NeonKakeibo.exe`** desde la sección **[Releases](https://github.com/Chutky-Sama/gestion-de-gastos-personales/releases)** (o directamente de la raíz del repositorio, ~1.1 MB, todo integrado en un solo ejecutable sin dependencias externas).
 2. Haz **doble clic en `NeonKakeibo.exe`**.
    > **Nota de Windows:** Como es un programa personal creado a medida (sin certificado comercial de Microsoft Store), la primera vez que lo abras puede aparecer el aviso azul *"Windows protegió su PC"*. Solo haz clic en **"Más información"** y luego en **"Ejecutar de todas formas"**.
 3. ¡Listo! Se abrirá en su propia ventana oscura de escritorio. Si ya usabas una versión previa, tus datos anteriores se migran automáticamente sin perder nada.
@@ -35,6 +35,11 @@ No necesitas instalar Node.js, ni Python, ni abrir ninguna consola:
   * Cuadrícula circular de íconos rápidos (`Compras`, `Alimentos`, `Teléfono`, `Entretenimiento`, `Educación`, `Belleza`, `Deportes`, `Social`, `Transporte`, `Ropa`, `Auto`, `Bebidas`, `Cigarrillos`, `Electrónica`, `Viajes`, `Salud`, `Mascotas`, `Reparaciones`, `Vivienda`, `Hogar`, `Regalos`, `Donaciones`, `Lotería`, `Snacks`, `Hijos`, `Verduras`, `Frutas`, servicios y botón **`+ Ajustes`** para crear categorías propias) tanto al asignar sobres como al registrar gastos diarios.
 * **Calendario Desplegable Extendido y Selector Multi-Año / Mes:**
   * Navega desde la barra superior abriendo la cuadrícula completa de días del mes (con ingresos/gastos diarios y filtro por día con 1 clic) o el selector de **12 meses y múltiples años**.
+* **Cartera de Inversiones con Gestión de Riesgos, Ganancias y Pérdidas (`v2.4.0`):**
+  * Clasifica cada inversión por **Nivel de Riesgo** (*Bajo*, *Medio*, *Alto*, *Especulativo*), **Liquidez** (*Inmediata 24h*, *7–30 días*, *Bloqueado*), **Retorno Esperado (`%`)** y **Stop-Loss / Pérdida Máxima Aceptable (`%`)**.
+  * Registra **Ganancias Cobradas** y **Retiros / Recuperación de Capital** con opción de acreditarlos automáticamente a tu saldo en **Efectivo** o **Transferencia** en el Libro Diario.
+  * Registra **Pérdidas / Mermas** (mercancía dañada, comisiones, caídas de valor) y **Tasaciones Manuales o Automáticas** del valor actual en cartera.
+  * Visualiza el **Termómetro de Riesgo Ponderado (`0–100`)**, anillo de exposición por riesgo, escenario de estrés, mapa divergente de Ganancias vs. Pérdidas (`ROI %`), alertas automáticas de Stop-Loss y barra de **Punto de Equilibrio (`Break-Even %`)**.
 * **Centro de Informes y Gráficos (`Informes y Gráficos` · 100% Offline):**
   * Gráficos interactivos en tiempo real: **Anillo / Pastel (Donut)** por categorías del hogar, sobres o pilares Kakeibo; **Curva Diaria de Saldos** (Total, Efectivo y Transferencia); **Barras Verticales Comparativas** (5 semanas y Planificado vs. Real); ** División por Canal (`Efectivo` vs `Transferencia`)** y **Comparativa Histórica Multimes**.
 * **Ventanas Emergentes Protegidas:** Ningún modal se cierra al hacer clic accidental fuera de él, evitando perder cambios sin guardar.

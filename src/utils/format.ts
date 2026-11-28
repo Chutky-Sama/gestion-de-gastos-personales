@@ -2,6 +2,9 @@ import { CURRENCY_OPTIONS, CurrencyOption, findCurrencyOption } from '../../shar
 import {
   AppDatabase,
   InvestmentCategory,
+  InvestmentEventKind,
+  InvestmentLiquidity,
+  InvestmentRiskLevel,
   KakeiboPillar,
   PaymentMethod,
 } from '../../shared/types';
@@ -115,6 +118,98 @@ export const INVESTMENT_CATEGORIES: Record<
   renta_fija: { label: 'Plazo Fijo / Cuenta Remunerada', badge: 'RENTA FIJA' },
   bienes_raices: { label: 'Bienes Raíces / Inmuebles', badge: 'INMUEBLES' },
   otro: { label: 'Otra Inversión', badge: 'ACTIVO' },
+};
+
+export const INVESTMENT_RISK_META: Record<
+  InvestmentRiskLevel,
+  {
+    label: string;
+    shortLabel: string;
+    badgeClass: string;
+    hex: string;
+    desc: string;
+  }
+> = {
+  bajo: {
+    label: 'Riesgo Bajo · Conservador',
+    shortLabel: 'Bajo',
+    badgeClass: 'risk-low',
+    hex: '#00f5a0',
+    desc: 'Reserva, plazo fijo o resguardo estable con muy poca probabilidad de pérdida.',
+  },
+  moderado: {
+    label: 'Riesgo Moderado · Equilibrado',
+    shortLabel: 'Moderado',
+    badgeClass: 'risk-medium',
+    hex: '#00f0ff',
+    desc: 'Divisas, bienes raíces o fondos equilibrados con fluctuación moderada.',
+  },
+  alto: {
+    label: 'Riesgo Alto · Dinámico',
+    shortLabel: 'Alto',
+    badgeClass: 'risk-high',
+    hex: '#ffb800',
+    desc: 'Mercancía, inventario, bolsa o negocio propio sujeto a ventas y mermas.',
+  },
+  especulativo: {
+    label: 'Riesgo Especulativo · Muy Alto',
+    shortLabel: 'Especulativo',
+    badgeClass: 'risk-speculative',
+    hex: '#ff2a85',
+    desc: 'Criptoactivos volátiles o apuestas de alto retorno donde el capital puede caer fuerte.',
+  },
+};
+
+export const INVESTMENT_LIQUIDITY_META: Record<
+  InvestmentLiquidity,
+  { label: string; shortLabel: string; desc: string }
+> = {
+  inmediata: {
+    label: 'Liquidez Inmediata (24h)',
+    shortLabel: 'Inmediata',
+    desc: 'Puedes convertirlo en Efectivo o Transferencia hoy mismo.',
+  },
+  corto_plazo: {
+    label: 'Corto Plazo (7–30 días)',
+    shortLabel: '7–30 días',
+    desc: 'Requiere vender mercancía o esperar liquidación corta.',
+  },
+  mediano_plazo: {
+    label: 'Mediano Plazo (1–6 meses)',
+    shortLabel: '1–6 meses',
+    desc: 'Plazos fijos cortos o ciclos de retorno trimestrales.',
+  },
+  largo_plazo: {
+    label: 'Largo Plazo / Bloqueado',
+    shortLabel: 'Bloqueado',
+    desc: 'Capital inmovilizado en equipos, inmuebles o plazos largos.',
+  },
+};
+
+export const INVESTMENT_EVENT_META: Record<
+  InvestmentEventKind,
+  { label: string; badge: string; tone: 'emerald' | 'cyan' | 'rose' | 'violet' }
+> = {
+  return_payout: {
+    label: 'Ganancia / Rendimiento Cobrado',
+    badge: 'GANANCIA',
+    tone: 'emerald',
+  },
+  capital_withdraw: {
+    label: 'Retiro / Recuperación de Capital',
+    badge: 'RETIRO',
+    tone: 'cyan',
+  },
+  loss_writeoff: {
+    label: 'Pérdida / Merma / Desvalorización',
+    badge: 'PÉRDIDA',
+    tone: 'rose',
+  },
+  valuation_sync: {
+    label: 'Actualización de Valor Actual',
+    badge: 'TASACIÓN',
+    tone: 'violet',
+  },
 };
 
 export function getDivisionLabel(

@@ -1,6 +1,6 @@
 {
   "name": "gestion-de-gastos-personales",
-  "version": "1.0.0",
+  "version": "2.4.0",
   "description": "Neon Kakeibo — Sistema de gestión de gastos personales mensuales estilo libreta asiática (Kakeibo / Gagyebu / Ji Zhang Ben)",
   "type": "module",
   "scripts": {

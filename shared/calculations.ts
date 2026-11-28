@@ -1,6 +1,9 @@
 import {
   AppDatabase,
+  InvestmentCategory,
   InvestmentDefinition,
+  InvestmentLiquidity,
+  InvestmentRiskLevel,
   KakeiboPillar,
   LedgerEntry,
   LedgerEntryWithBalance,
@@ -119,6 +122,291 @@ export function computeAllTimeInvestmentTotals(
     }
   }
   return totals;
+}
+
+export const DEFAULT_RISK_DRAWDOWN_PCT: Record<InvestmentRiskLevel, number> = {
+  bajo: 5,
+  moderado: 15,
+  alto: 35,
+  especulativo: 70,
+};
+
+export const DEFAULT_EXPECTED_ROI_PCT: Record<InvestmentRiskLevel, number> = {
+  bajo: 6,
+  moderado: 14,
+  alto: 25,
+  especulativo: 45,
+};
+
+const RISK_SCORE_WEIGHTS: Record<InvestmentRiskLevel, number> = {
+  bajo: 18,
+  moderado: 45,
+  alto: 74,
+  especulativo: 95,
+};
+
+export function inferDefaultRiskByCategory(category: InvestmentCategory): InvestmentRiskLevel {
+  switch (category) {
+    case 'ahorro_meta':
+    case 'renta_fija':
+      return 'bajo';
+    case 'divisas':
+    case 'bienes_raices':
+      return 'moderado';
+    case 'cripto':
+      return 'especulativo';
+    case 'negocio':
+    case 'acciones_etf':
+    default:
+      return 'alto';
+  }
+}
+
+export function inferDefaultLiquidityByCategory(
+  category: InvestmentCategory
+): InvestmentLiquidity {
+  switch (category) {
+    case 'divisas':
+    case 'ahorro_meta':
+    case 'cripto':
+      return 'inmediata';
+    case 'negocio':
+    case 'acciones_etf':
+      return 'corto_plazo';
+    case 'renta_fija':
+      return 'mediano_plazo';
+    case 'bienes_raices':
+      return 'largo_plazo';
+    default:
+      return 'corto_plazo';
+  }
+}
+
+export interface InvestmentPerformanceMetrics {
+  investment: InvestmentDefinition;
+  riskLevel: InvestmentRiskLevel;
+  liquidity: InvestmentLiquidity;
+  totalInvested: number;
+  realizedProfit: number;
+  withdrawnPrincipal: number;
+  recordedLosses: number;
+  totalReturnedToHand: number;
+  autoBookValue: number;
+  hasManualValuation: boolean;
+  activeValueInPlay: number;
+  totalWealthGenerated: number;
+  netProfitLoss: number;
+  roiPercent: number;
+  expectedRoiPercent: number;
+  capitalRecoveryPercent: number;
+  effectiveMaxLossPct: number;
+  potentialAdverseLossAmount: number;
+  currentDrawdownPct: number;
+  isStopLossBreached: boolean;
+}
+
+export interface PortfolioAnalyticsSummary {
+  items: InvestmentPerformanceMetrics[];
+  byId: Record<string, InvestmentPerformanceMetrics>;
+  totalInvestedAllTime: number;
+  totalActiveValueInPlay: number;
+  totalReturnedToHand: number;
+  totalRealizedProfit: number;
+  totalRecordedLosses: number;
+  totalNetProfitLoss: number;
+  overallRoiPercent: number;
+  overallRecoveryPercent: number;
+  totalAdverseRiskAmount: number;
+  capitalByRisk: Record<InvestmentRiskLevel, number>;
+  capitalByLiquidity: Record<InvestmentLiquidity, number>;
+  usingPlannedWeightsForRiskMap: boolean;
+  highRiskSharePercent: number;
+  weightedRiskScore: number;
+  stopLossAlertsCount: number;
+}
+
+export function computePortfolioAnalytics(
+  monthsMap: Record<string, MonthRecord>,
+  investments: InvestmentDefinition[]
+): PortfolioAnalyticsSummary {
+  const allTimeTotals = computeAllTimeInvestmentTotals(monthsMap, investments);
+
+  const items: InvestmentPerformanceMetrics[] = investments.map((inv) => {
+    const riskLevel = inv.riskLevel || inferDefaultRiskByCategory(inv.category);
+    const liquidity = inv.liquidity || inferDefaultLiquidityByCategory(inv.category);
+    const totalInvested = round2(allTimeTotals[inv.id] || 0);
+
+    let realizedProfit = 0;
+    let withdrawnPrincipal = 0;
+    let recordedLosses = 0;
+
+    for (const ev of inv.events || []) {
+      const amt = round2(Math.max(0, Number(ev.amount) || 0));
+      if (ev.kind === 'return_payout') {
+        realizedProfit = round2(realizedProfit + amt);
+      } else if (ev.kind === 'capital_withdraw') {
+        withdrawnPrincipal = round2(withdrawnPrincipal + amt);
+      } else if (ev.kind === 'loss_writeoff') {
+        recordedLosses = round2(recordedLosses + amt);
+      }
+    }
+
+    const totalReturnedToHand = round2(realizedProfit + withdrawnPrincipal);
+    const autoBookValue = round2(
+      Math.max(0, totalInvested - withdrawnPrincipal - recordedLosses)
+    );
+    const hasManualValuation =
+      inv.currentEstimatedValue !== undefined &&
+      inv.currentEstimatedValue !== null &&
+      Number.isFinite(Number(inv.currentEstimatedValue));
+
+    const activeValueInPlay = hasManualValuation
+      ? round2(Math.max(0, Number(inv.currentEstimatedValue)))
+      : autoBookValue;
+
+    const totalWealthGenerated = round2(activeValueInPlay + totalReturnedToHand);
+    const netProfitLoss = round2(totalWealthGenerated - totalInvested);
+    const roiPercent =
+      totalInvested > 0 ? round2((netProfitLoss / totalInvested) * 100) : 0;
+    const capitalRecoveryPercent =
+      totalInvested > 0 ? round2((totalReturnedToHand / totalInvested) * 100) : 0;
+
+    const expectedRoiPercent =
+      inv.expectedRoiPercent !== undefined
+        ? round2(Math.max(0, Number(inv.expectedRoiPercent) || 0))
+        : DEFAULT_EXPECTED_ROI_PCT[riskLevel];
+
+    const effectiveMaxLossPct =
+      inv.maxAcceptableLossPercent !== undefined
+        ? round2(Math.max(0, Number(inv.maxAcceptableLossPercent) || 0))
+        : DEFAULT_RISK_DRAWDOWN_PCT[riskLevel];
+
+    const potentialAdverseLossAmount = round2(
+      (activeValueInPlay * effectiveMaxLossPct) / 100
+    );
+
+    const currentDrawdownPct =
+      netProfitLoss < 0 && totalInvested > 0
+        ? round2((Math.abs(netProfitLoss) / totalInvested) * 100)
+        : 0;
+
+    const isStopLossBreached =
+      totalInvested > 0 &&
+      effectiveMaxLossPct > 0 &&
+      currentDrawdownPct >= effectiveMaxLossPct;
+
+    return {
+      investment: inv,
+      riskLevel,
+      liquidity,
+      totalInvested,
+      realizedProfit,
+      withdrawnPrincipal,
+      recordedLosses,
+      totalReturnedToHand,
+      autoBookValue,
+      hasManualValuation,
+      activeValueInPlay,
+      totalWealthGenerated,
+      netProfitLoss,
+      roiPercent,
+      expectedRoiPercent,
+      capitalRecoveryPercent,
+      effectiveMaxLossPct,
+      potentialAdverseLossAmount,
+      currentDrawdownPct,
+      isStopLossBreached,
+    };
+  });
+
+  const byId: Record<string, InvestmentPerformanceMetrics> = {};
+  let totalInvestedAllTime = 0;
+  let totalActiveValueInPlay = 0;
+  let totalReturnedToHand = 0;
+  let totalRealizedProfit = 0;
+  let totalRecordedLosses = 0;
+  let totalNetProfitLoss = 0;
+  let totalAdverseRiskAmount = 0;
+  let stopLossAlertsCount = 0;
+
+  for (const m of items) {
+    byId[m.investment.id] = m;
+    totalInvestedAllTime = round2(totalInvestedAllTime + m.totalInvested);
+    totalActiveValueInPlay = round2(totalActiveValueInPlay + m.activeValueInPlay);
+    totalReturnedToHand = round2(totalReturnedToHand + m.totalReturnedToHand);
+    totalRealizedProfit = round2(totalRealizedProfit + m.realizedProfit);
+    totalRecordedLosses = round2(totalRecordedLosses + m.recordedLosses);
+    totalNetProfitLoss = round2(totalNetProfitLoss + m.netProfitLoss);
+    totalAdverseRiskAmount = round2(totalAdverseRiskAmount + m.potentialAdverseLossAmount);
+    if (m.isStopLossBreached) stopLossAlertsCount += 1;
+  }
+
+  const overallRoiPercent =
+    totalInvestedAllTime > 0
+      ? round2((totalNetProfitLoss / totalInvestedAllTime) * 100)
+      : 0;
+  const overallRecoveryPercent =
+    totalInvestedAllTime > 0
+      ? round2((totalReturnedToHand / totalInvestedAllTime) * 100)
+      : 0;
+
+  const capitalByRisk: Record<InvestmentRiskLevel, number> = {
+    bajo: 0,
+    moderado: 0,
+    alto: 0,
+    especulativo: 0,
+  };
+
+  const capitalByLiquidity: Record<InvestmentLiquidity, number> = {
+    inmediata: 0,
+    corto_plazo: 0,
+    mediano_plazo: 0,
+    largo_plazo: 0,
+  };
+
+  const usingPlannedWeightsForRiskMap = totalActiveValueInPlay <= 0;
+  let weightDenominator = 0;
+  let weightedScoreAccumulator = 0;
+
+  for (const m of items) {
+    capitalByLiquidity[m.liquidity] = round2(
+      capitalByLiquidity[m.liquidity] + m.activeValueInPlay
+    );
+    if (!m.investment.active && m.activeValueInPlay <= 0) continue;
+    const weight = usingPlannedWeightsForRiskMap
+      ? round2(Math.max(0, m.investment.monthlyTarget || 0))
+      : m.activeValueInPlay;
+    if (weight <= 0) continue;
+    capitalByRisk[m.riskLevel] = round2(capitalByRisk[m.riskLevel] + weight);
+    weightDenominator = round2(weightDenominator + weight);
+    weightedScoreAccumulator += weight * RISK_SCORE_WEIGHTS[m.riskLevel];
+  }
+
+  const highRiskCap = round2(capitalByRisk.alto + capitalByRisk.especulativo);
+  const highRiskSharePercent =
+    weightDenominator > 0 ? round2((highRiskCap / weightDenominator) * 100) : 0;
+  const weightedRiskScore =
+    weightDenominator > 0 ? Math.round(weightedScoreAccumulator / weightDenominator) : 0;
+
+  return {
+    items,
+    byId,
+    totalInvestedAllTime,
+    totalActiveValueInPlay,
+    totalReturnedToHand,
+    totalRealizedProfit,
+    totalRecordedLosses,
+    totalNetProfitLoss,
+    overallRoiPercent,
+    overallRecoveryPercent,
+    totalAdverseRiskAmount,
+    capitalByRisk,
+    capitalByLiquidity,
+    usingPlannedWeightsForRiskMap,
+    highRiskSharePercent,
+    weightedRiskScore,
+    stopLossAlertsCount,
+  };
 }
 
 export function getEffectiveAllocation(

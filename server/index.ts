@@ -10,9 +10,11 @@ import {
   applyCreateInvestment,
   applyDeleteEntry,
   applyDeleteInvestment,
+  applyDeleteInvestmentEvent,
   applyEnsureMonth,
   applyExecuteCurrencyExchange,
   applyExitDemoReset,
+  applyRecordInvestmentEvent,
   applySelectCurrency,
   applyStartOneTimeDemo,
   applyUpdateEnabledCurrencies,
@@ -99,6 +101,16 @@ async function startServer() {
 
   app.put('/api/investments/:id', (req, res) => {
     handleMutation(res, (db) => applyUpdateInvestment(db, req.params.id, req.body || {}));
+  });
+
+  app.post('/api/investments/:id/events', (req, res) => {
+    handleMutation(res, (db) => applyRecordInvestmentEvent(db, req.params.id, req.body || {}));
+  });
+
+  app.delete('/api/investments/:id/events/:eventId', (req, res) => {
+    handleMutation(res, (db) =>
+      applyDeleteInvestmentEvent(db, req.params.id, req.params.eventId)
+    );
   });
 
   app.delete('/api/investments/:id', (req, res) => {

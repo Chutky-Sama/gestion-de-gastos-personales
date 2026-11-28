@@ -758,6 +758,7 @@ export const App: React.FC = () => {
           <InvestmentsTab
             monthKey={activeMonth.monthKey}
             currencyCode={currencyCode}
+            monthsMap={activeWorkspace.months}
             investments={activeWorkspace.investments}
             summary={summary}
             allTimeTotals={allTimeInvestmentTotals}
@@ -777,6 +778,26 @@ export const App: React.FC = () => {
               });
               setDb(next);
               showToast('Inversión actualizada');
+            }}
+            onRecordInvestmentEvent={async (id, payload) => {
+              const next = await api.recordInvestmentEvent(id, payload);
+              setDb(next);
+              const msgByKind = {
+                return_payout: payload.creditToLedger
+                  ? 'Ganancia registrada y sumada a tu Libro Diario'
+                  : 'Ganancia registrada en cartera',
+                capital_withdraw: payload.creditToLedger
+                  ? 'Capital retirado y acreditado en tu Libro Diario'
+                  : 'Retiro de capital registrado en cartera',
+                loss_writeoff: 'Pérdida / merma registrada en la inversión',
+                valuation_sync: 'Valor actual de la inversión actualizado',
+              };
+              showToast(msgByKind[payload.kind]);
+            }}
+            onDeleteInvestmentEvent={async (id, eventId) => {
+              const next = await api.deleteInvestmentEvent(id, eventId);
+              setDb(next);
+              showToast('Movimiento de cartera revertido');
             }}
             onDeleteInvestment={async (id) => {
               const next = await api.deleteInvestment(id);
